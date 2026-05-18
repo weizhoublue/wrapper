@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            target: node18-macos-arm64
+            artifact: wrapper-macos-arm64
+          - os: ubuntu-latest
+            target: node18-linux-x64
+            artifact: wrapper-linux-x64
+          - os: ubuntu-latest
+            target: node18-linux-arm64
+            artifact: wrapper-linux-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Sanitize ref name
+        id: ref
+        run: echo "name=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - run: npm run build:bundle
+      - run: npm run build:patch
+
+      - name: Cache pkg binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.pkg-cache
+          key: pkg-cache-${{ runner.os }}-${{ runner.arch }}
+
+      - run: npx @yao-pkg/pkg dist/wrapper-bundle.js --targets ${{ matrix.target }} --output dist/wrapper
+
+      - run: mv dist/wrapper dist/${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ steps.ref.outputs.name }}
+          path: dist/${{ matrix.artifact }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanitize ref name
+        id: ref
+        run: echo "name=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wrapper-*-${{ steps.ref.outputs.name }}
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/wrapper*
+          generate_release_notes: true
+          make_latest: true
+
+      - name: Force-create release branch
+        run: |
+          git checkout -b "release/${{ github.ref_name }}"
+          git push origin "release/${{ github.ref_name }}" --force

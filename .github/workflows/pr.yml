@@ -1,0 +1,18 @@
+name: PR Test
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:bundle && npm run build:patch && npx @yao-pkg/pkg dist/wrapper-bundle.js --targets node18-linux-x64 --output dist/wrapper
