@@ -7,6 +7,7 @@ const DEFAULTS = {
   codex: "codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
   copilot: "copilot --acp --allow-all-tools --allow-all-paths --allow-all-urls --no-ask-user",
   gemini: "gemini --acp --approval-mode=yolo --skip-trust",
+  cursor: "agent --yolo --approve-mcps acp",
 };
 
 const HELP = `Usage: wrapper -p <prompt> [options]
@@ -17,7 +18,7 @@ Required:
   -p, --prompt <text>     User prompt
 
 Options:
-  -t, --type <name>       Provider type: claude, codex, copilot, gemini (default: claude)
+  -t, --type <name>       Provider type: claude, codex, copilot, gemini, cursor (default: claude)
   -c, --command <cmd>     Command to execute (default: depends on -t)
   -d, --debug             Enable debug logging to stderr
   -e, --reg <pattern>     Regex pattern to match against output
@@ -52,6 +53,13 @@ copilot:
 
 gemini:
   wrapper -t gemini -p "say hi in one word"
+
+cursor:
+  wrapper -t cursor -p "say hi in one word"
+
+  wrapper -t cursor -p "tomorrow will rain" 2>/tmp/sid
+  session=$(tail -1 /tmp/sid)
+  wrapper -t cursor -s \${session} -p "tell me all what I have said in this session"
 
 debug:
   wrapper -t claude -c "claude-free" -d -p "say hi in one word"
@@ -148,6 +156,7 @@ async function main() {
     codex: require("./provider/codex"),
     copilot: require("./provider/copilot"),
     gemini: require("./provider/gemini"),
+    cursor: require("./provider/cursor"),
   };
   const provider = providers[opts.type];
   if (!provider) {

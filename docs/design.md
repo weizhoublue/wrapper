@@ -40,7 +40,7 @@ wrapper -p <prompt> [-t claude] [-c "claude"] [-d] [-s <id>] [-e "regex"] [-r 3]
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
 | `-p, --prompt` | 是 | - | 用户提示词 |
-| `-t, --type` | 否 | `claude` | provider 类型 |
+| `-t, --type` | 否 | `claude` | provider 类型：`claude` / `codex` / `copilot` / `gemini` / `cursor` |
 | `-c, --command` | 否 | 跟 `-t` 联动 | 实际执行的命令，支持带参数 |
 | `-d, --debug` | 否 | 关 | 开启日志 |
 | `-e, --reg` | 否 | 空 | 正则匹配模式 |
@@ -97,6 +97,7 @@ run({ command, prompt, timeout }) → { stdout, stderr, sessionId, exitCode }  /
 | Claude | `--resume <id>` CLI flag | `claude ... --resume <id>` |
 | Copilot | ACP `session/load` 协议方法 | `connection.loadSession({ sessionId, cwd })` |
 | Gemini | ACP `session/load` 协议方法 | `connection.loadSession({ sessionId, cwd })` |
+| Cursor | ACP `session/load` 协议方法 | `agent --yolo --approve-mcps acp` + `connection.loadSession({ sessionId, cwd })` |
 
 Copilot / Gemini 不使用 `--resume` CLI flag（该 flag 仅在交互模式下有效，与 `--acp` 不兼容）。在 ACP 模式下通过 `session/load` 协议方法恢复 session。
 
@@ -152,6 +153,7 @@ src/
     codex.js                    — Codex ACP 适配
     copilot.js                  — Copilot ACP 适配
     gemini.js                   — Gemini ACP 适配（复用 acp.js）
+    cursor.js                   — Cursor ACP 适配（复用 acp.js）
 scripts/
   patch-bundle.js               — 修复 esbuild 打包后的 import_meta.url
 Makefile                        — test / build / clean targets
@@ -163,3 +165,4 @@ dist/                           — 构建产物（二进制 + bundle）
 - Codex provider：已实现，spawn + NDJSON 解析，见 `src/provider/codex.js`
 - Copilot provider：已实现，使用 `@agentclientprotocol/sdk` (ACP)，见 `src/provider/copilot.js` + `src/provider/acp.js`
 - Gemini provider：已实现，复用 ACP，见 `src/provider/gemini.js` + `src/provider/acp.js`
+- Cursor provider：已实现，复用 ACP，见 `src/provider/cursor.js` + `src/provider/acp.js`

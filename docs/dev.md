@@ -35,6 +35,7 @@ src/
     codex.js             — Codex spawn + NDJSON 适配
     copilot.js           — Copilot ACP 适配
     gemini.js            — Gemini ACP 适配（复用 acp.js）
+    cursor.js            — Cursor ACP 适配（复用 acp.js）
 test/
   log.test.js
   main.test.js
@@ -124,11 +125,12 @@ const providers = {
   codex: require("./provider/codex"),
   copilot: require("./provider/copilot"),
   gemini: require("./provider/gemini"),
+  cursor: require("./provider/cursor"),
 };
 const provider = providers[opts.type];
 ```
 
-静态 lookup table 替代原动态 `require(\`./provider/${opts.type}\`)`，确保 esbuild 打包时所有 provider 被正确包含。codex / copilot 当前为 stub 实现（抛出 "not yet implemented"）。
+静态 lookup table 替代原动态 `require(\`./provider/${opts.type}\`)`，确保 esbuild 打包时所有 provider 被正确包含。
 
 ## Claude provider 细节
 

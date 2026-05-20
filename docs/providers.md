@@ -2,7 +2,7 @@
 
 ## 概览
 
-wrapper 通过统一的 `provider` 接口对接不同的 AI coding agent CLI 工具。已实现 claude、codex、copilot、gemini。
+wrapper 通过统一的 `provider` 接口对接不同的 AI coding agent CLI 工具。已实现 claude、codex、copilot、gemini、cursor。
 
 所有 provider 导出相同接口：
 
@@ -28,6 +28,9 @@ copilot --acp --allow-all-tools --allow-all-paths --allow-all-urls --no-ask-user
 
 # gemini
 gemini --acp --approval-mode=yolo --skip-trust
+
+# cursor
+agent --yolo --approve-mcps acp
 ```
 
 | Provider | 通信方式 | npm 依赖 | 自动注入 flag | Resume（`-s`） |
@@ -36,6 +39,7 @@ gemini --acp --approval-mode=yolo --skip-trust
 | Codex | spawn `codex exec` + NDJSON | 无 | `--json`, `--dangerously-bypass-approvals-and-sandbox`, `--skip-git-repo-check` | `exec resume <id>` 子命令 |
 | Copilot | `@agentclientprotocol/sdk` (ACP) | `agentclientprotocol/sdk` | `--acp`, `--allow-all-tools`, `--allow-all-paths`, `--allow-all-urls`, `--no-ask-user` | ACP `session/load` 协议方法 |
 | Gemini | `@agentclientprotocol/sdk` (ACP) | `agentclientprotocol/sdk` | `--acp`, `--approval-mode=yolo`, `--skip-trust` | ACP `session/load` 协议方法 |
+| Cursor | `@agentclientprotocol/sdk` (ACP) | `agentclientprotocol/sdk` | `--yolo`, `--approve-mcps`, `acp` | ACP `session/load` 协议方法 |
 
 ## Claude
 
@@ -349,6 +353,74 @@ gemini --version  # 确认当前版本
 npm test                                    # 单元测试 + 集成测试
 node --test test/provider/gemini.test.js    # Gemini 专用测试
 wrapper -t gemini -p "hello" -d               # 实际调用
+```
+
+## Cursor
+
+### CLI 工具
+
+[Cursor Agent CLI](https://cursor.com/docs/cli/overview)（CLI 命令：`agent`，别名 `cursor-agent`）。
+
+### 为什么用 ACP
+
+Cursor CLI **原生支持 ACP**。默认以 `agent --yolo --approve-mcps acp` 启动：在 `acp` 子命令前注入 `--yolo`（放开命令/写文件/shell）与 `--approve-mcps`（自动批准 MCP），再经 JSON-RPC 与 wrapper 通信。Print 模式（`-p`）不用于 wrapper，因 session 管理依赖 ACP 的 `session/new` 与 `session/load`。
+
+### SDK
+
+| 项目 | 说明 |
+|------|------|
+| npm 包 | `@agentclientprotocol/sdk` |
+| 协议版本 | `PROTOCOL_VERSION = 1` |
+
+### 交互原理
+
+与 Copilot/Gemini 相同，复用 `src/provider/acp.js`。`cursor.js` 为 thin wrapper，负责 `ensureFlags` 注入 `acp` 子命令并传入 `provider: "cursor"` 以启用 `CursorNonInteractiveClient`。
+
+### 必需 flag（自动注入）
+
+在 `acp` 子命令**之前**插入（若已有则跳过）：
+
+| 注入 | 作用 |
+|------|------|
+| `--yolo` | 强制允许命令（Run Everything），便于写文件、跑 shell |
+| `--approve-mcps` | 自动批准 MCP 服务器 |
+| `acp` | 开启 ACP 服务器模式 |
+
+示例：`agent` → `agent --yolo --approve-mcps acp`
+
+**不注入** `--trust`（仅 print 模式有效）、`-p`（print 模式）。工具权限仍由 ACP `session/request_permission` + wrapper 自动批准兜底。
+
+### Session Resume（`-s`）
+
+指定 `-s` 时，`acp.js` 调用 `connection.loadSession({ sessionId, cwd, mcpServers: [] })`。不使用 CLI `--resume`（与 ACP 模式不兼容）。
+
+### Cursor ACP 扩展（非交互）
+
+| 方法 | 行为 |
+|------|------|
+| `cursor/ask_question` | 自动选每题第一个选项 |
+| `cursor/create_plan` | 自动 `accepted` |
+| `cursor/update_todos` | 通知，仅 debug 日志 |
+| `cursor/task` | 通知，仅 debug 日志 |
+| `cursor/generate_image` | 通知，仅 debug 日志 |
+
+### 认证
+
+假定用户已 `agent login` 或设置 `CURSOR_API_KEY`。Cursor ACP 在 `initialize` 后需调用 `authenticate({ methodId: "cursor_login" })` 完成协议握手（使用已有 CLI 凭证，不打开浏览器）。未登录时 `wrapAcpError` 返回可读提示（copilot/gemini 共用同一机制）。
+
+### 升级方式
+
+按 Cursor CLI 官方文档更新 `agent` 二进制；关注 ACP 扩展方法与 `session/load` 行为变化。
+
+验证：
+
+```bash
+npm test
+node --test test/provider/cursor.test.js
+wrapper -t cursor -p "hello" -d
+wrapper -t cursor -p "hi" 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+wrapper -t cursor -s "$session" -p "what did I say?"
 ```
 
 ## 添加新 Provider

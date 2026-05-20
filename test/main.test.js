@@ -19,6 +19,11 @@ describe("parseArgs", () => {
     assert.strictEqual(opts.command, "claude --dangerously-skip-permissions --permission-mode=bypassPermissions");
   });
 
+  it("resolves default command for cursor type", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "-t", "cursor"]);
+    assert.strictEqual(opts.command, "agent --yolo --approve-mcps acp");
+  });
+
   it("respects explicit -c", () => {
     const opts = parseArgs(["node", "main.js", "-p", "hi", "-c", "my-claude"]);
     assert.strictEqual(opts.command, "my-claude");
