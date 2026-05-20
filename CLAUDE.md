@@ -10,6 +10,7 @@ npm test             # run all tests
 node --test test/log.test.js              # single test file
 node --test test/provider/claude.test.js
 node --test test/main.test.js
+node --test test/provider/cursor.test.js
 ```
 
 No compilation needed — Node.js runs source directly.
@@ -20,7 +21,7 @@ One-shot CLI wrapper for AI coding agents. Spawns Claude via `@anthropic-ai/clau
 
 - **wrapper** (`src/main.js`): CLI entry, parses args, selects provider, runs retry loop, manages output
 - **log** (`src/log.js`): `[wrapper][level][timestamp]` format to stderr, info/error/debug levels
-- **provider** (`src/provider/`): Each provider exports `run({command, prompt, timeout}) → {stdout, stderr, sessionId, exitCode}`
+- **provider** (`src/provider/`): Each provider exports `createSession` / `send` / `closeSession` (claude, codex, copilot, gemini, cursor)
 
 ### CLI
 
@@ -30,6 +31,7 @@ wrapper -p <prompt> [-t claude] [-c "claude"] [-d] [-s] [-e "regex"] [-r 3] [-o 
 
 ### Key design decisions
 
+- **Cursor** provider: `agent --yolo --approve-mcps acp` + ACP `session/new|load`; `authenticate(cursor_login)` after `initialize`; permissions via `session/request_permission` auto-allow in `acp.js`.
 - Claude Agent SDK handles all subprocess communication via pipe. No PTY.
 - `permissionMode: "bypassPermissions"` + `allowDangerouslySkipPermissions: true` for non-interactive mode.
 - One-shot: `query()` accepts string prompt (no async iterable needed).

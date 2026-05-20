@@ -29,7 +29,7 @@ function ensureFlags(command) {
 async function createSession(opts) {
   const command = ensureFlags(opts.command);
   log.debug("copilot provider: creating session command=%s resume=%s", command, opts.resume || "(none)");
-  return acp.createSession({ ...opts, command });
+  return acp.createSession({ ...opts, command, provider: "copilot" });
 }
 
 async function send(session, prompt) {

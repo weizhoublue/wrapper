@@ -39,7 +39,7 @@ node src/main.js -h
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
 | `-p, --prompt` | 是 | - | 用户提示词 |
-| `-t, --type` | 否 | `claude` | provider 类型：claude / codex / copilot / gemini |
+| `-t, --type` | 否 | `claude` | provider 类型：claude / codex / copilot / gemini / cursor |
 | `-c, --command` | 否 | 跟 `-t` 联动 | 实际执行的命令，支持带参数如 `"claude --resume id"` |
 | `-d, --debug` | 否 | 关 | 开启日志（所有级别输出到 stderr） |
 | `-e, --reg` | 否 | 空 | 正则匹配模式，不匹配则重试 |
@@ -85,6 +85,9 @@ node src/main.js -t copilot -s ${session} -p "继续上次对话"
 
 # Gemini（内部使用 ACP session/load 协议）
 node src/main.js -t gemini -s ${session} -p "继续上次对话"
+
+# Cursor（内部使用 ACP session/load 协议）
+node src/main.js -t cursor -s ${session} -p "继续上次对话"
 ```
 
 ### 正则匹配 + 重试
@@ -102,7 +105,36 @@ node src/main.js -p "hello" -d
 # -d 输出所有日志到 stderr：attempt 进度、session ID、retry 原因
 ```
 
+## 各 Provider 默认命令
+
+不指定 `-c` 时，由 `-t` 决定实际启动命令：
+
+| `-t` | 默认 `-c` |
+|------|-----------|
+| `claude` | `claude --dangerously-skip-permissions --permission-mode=bypassPermissions` |
+| `codex` | `codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check` |
+| `copilot` | `copilot --acp --allow-all-tools --allow-all-paths --allow-all-urls --no-ask-user` |
+| `gemini` | `gemini --acp --approval-mode=yolo --skip-trust` |
+| `cursor` | `agent --yolo --approve-mcps acp` |
+
+`cursor` 使用 ACP 模式，适合改文件、跑 shell、用 MCP；需事先执行 `agent login` 或配置 `CURSOR_API_KEY`。详见 [providers.md](./providers.md#cursor)。
+
+### Cursor 快速示例
+
+```bash
+# 基本调用（自动注入 --yolo --approve-mcps acp）
+node src/main.js -t cursor -p "say hi in one word"
+
+# 提取 session ID 并恢复会话
+node src/main.js -t cursor -p "tomorrow will rain" 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+node src/main.js -t cursor -s "$session" -p "what did I say earlier?"
+
+# 自定义可执行文件（ensureFlags 仍会补全缺失 flag）
+node src/main.js -t cursor -c "cursor-agent" -p "refactor src/foo.js"
+```
+
 ## 依赖
 
 - Node.js >= 18
-- Claude CLI 已安装并认证
+- 对应 provider 的 CLI 已安装并认证（Claude：`claude`；Cursor：`agent` + `agent login`）

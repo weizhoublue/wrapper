@@ -5,6 +5,37 @@ const path = require("path");
 const acp = require("@agentclientprotocol/sdk");
 const log = require("../log");
 
+const AUTH_PATTERNS = [
+  /unauthorized/i,
+  /not authenticated/i,
+  /authentication required/i,
+  /auth_required/i,
+  /login required/i,
+  /please log in/i,
+  /run\s+.*\s+login/i,
+];
+
+const AUTH_HINTS = {
+  cursor: "Run: agent login\n  Or set: CURSOR_API_KEY",
+  copilot: "Run: copilot (ensure GitHub Copilot CLI is authenticated)",
+  gemini: "Run: gemini auth login (or your gemini CLI login command)",
+};
+
+function isAuthError(err, childStderr = "") {
+  const text = [err?.message, err?.code, String(childStderr)].filter(Boolean).join(" ");
+  return AUTH_PATTERNS.some((re) => re.test(text));
+}
+
+function formatAuthHint(provider) {
+  const hint = AUTH_HINTS[provider] || `Authenticate your ${provider} CLI`;
+  return `Authentication required for ${provider}.\n  ${hint}`;
+}
+
+function wrapAcpError(provider, err, childStderr = "") {
+  if (!isAuthError(err, childStderr)) return err;
+  return new Error(formatAuthHint(provider));
+}
+
 class NonInteractiveClient {
   constructor() {
     this.notifications = [];
@@ -43,6 +74,37 @@ class NonInteractiveClient {
     fs.mkdirSync(path.dirname(params.path), { recursive: true });
     fs.writeFileSync(params.path, params.content, "utf8");
     return {};
+  }
+}
+
+class CursorNonInteractiveClient extends NonInteractiveClient {
+  async askQuestion(params) {
+    log.debug("acp: cursor/ask_question title=%s questions=%d",
+      params.title || "(none)", params.questions?.length || 0);
+    const answers = (params.questions || []).map((q) => ({
+      questionId: q.id,
+      selectedOptionIds: q.options?.[0]?.id ? [q.options[0].id] : [],
+    }));
+    return { outcome: { outcome: "answered", answers } };
+  }
+
+  async createPlan(params) {
+    log.debug("acp: cursor/create_plan name=%s", params.name || "(none)");
+    return { outcome: { outcome: "accepted" } };
+  }
+
+  async updateTodos(params) {
+    log.debug("acp: cursor/update_todos count=%d merge=%s",
+      params.todos?.length || 0, params.merge);
+  }
+
+  async task(params) {
+    log.debug("acp: cursor/task description=%s", params.description || "(none)");
+  }
+
+  async generateImage(params) {
+    log.debug("acp: cursor/generate_image desc=%s",
+      (params.description || "(none)").slice(0, 60));
   }
 }
 
@@ -102,14 +164,14 @@ function extractThinking(notifications, response) {
   return parts.join("");
 }
 
-async function createSession({ command, timeout, resume }) {
+async function createSession({ command, timeout, resume, provider = "copilot" }) {
   const { command: cmd, args } = splitCommand(command);
 
   const resolved = which(cmd);
   if (!resolved) {
     throw new Error(`command not found: ${cmd}`);
   }
-  log.debug("acp: resolved command=%s args=%j", resolved, args);
+  log.debug("acp: resolved command=%s args=%j provider=%s", resolved, args, provider);
 
   const child = spawn(cmd, args, {
     stdio: ["pipe", "pipe", "pipe"],
@@ -122,7 +184,8 @@ async function createSession({ command, timeout, resume }) {
   let childError = null;
   child.on("error", (err) => { childError = err; });
 
-  const client = new NonInteractiveClient();
+  const ClientClass = provider === "cursor" ? CursorNonInteractiveClient : NonInteractiveClient;
+  const client = new ClientClass();
   const stream = acp.ndJsonStream(
     Writable.toWeb(child.stdin),
     Readable.toWeb(child.stdout),
@@ -131,47 +194,62 @@ async function createSession({ command, timeout, resume }) {
 
   const deadline = timeout > 0 ? Date.now() + timeout * 1000 : Infinity;
 
-  // Initialize
-  const initResult = await withDeadline(
-    connection.initialize({
-      protocolVersion: acp.PROTOCOL_VERSION,
-      clientCapabilities: {
-        fs: { readTextFile: true, writeTextFile: true },
-      },
-    }),
-    deadline,
-  );
-  log.debug("acp: initialized v%d agent=%s", initResult.protocolVersion,
-    JSON.stringify(initResult.agentInfo));
+  try {
+    if (childError) {
+      throw childError;
+    }
 
-  // New session or load existing
-  let sessionId;
-  if (resume) {
-    await withDeadline(
-      connection.loadSession({ sessionId: resume, cwd: process.cwd(), mcpServers: [] }),
+    const initResult = await withDeadline(
+      connection.initialize({
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: {
+          fs: { readTextFile: true, writeTextFile: true },
+        },
+      }),
       deadline,
     );
-    sessionId = resume;
-    log.debug("acp: loaded session id=%s", sessionId);
-  } else {
-    const sessionResult = await withDeadline(
-      connection.newSession({ cwd: process.cwd(), mcpServers: [] }),
+    log.debug("acp: initialized v%d agent=%s", initResult.protocolVersion,
+      JSON.stringify(initResult.agentInfo));
+
+    if (provider === "cursor") {
+      await withDeadline(
+        connection.authenticate({ methodId: "cursor_login" }),
+        deadline,
+      );
+      log.debug("acp: cursor authenticate ok");
+    }
+
+    let sessionId;
+    if (resume) {
+      await withDeadline(
+        connection.loadSession({ sessionId: resume, cwd: process.cwd(), mcpServers: [] }),
+        deadline,
+      );
+      sessionId = resume;
+      log.debug("acp: loaded session id=%s", sessionId);
+    } else {
+      const sessionResult = await withDeadline(
+        connection.newSession({ cwd: process.cwd(), mcpServers: [] }),
+        deadline,
+      );
+      sessionId = sessionResult.sessionId;
+      log.debug("acp: new session id=%s", sessionId);
+    }
+
+    return {
+      child,
+      connection,
+      client,
+      sessionId,
+      provider,
+      childStderr: () => childStderr,
+      childError: () => childError,
       deadline,
-    );
-    sessionId = sessionResult.sessionId;
-    log.debug("acp: new session id=%s", sessionId);
+      closed: false,
+    };
+  } catch (err) {
+    throw wrapAcpError(provider, err, childStderr);
   }
-
-  return {
-    child,
-    connection,
-    client,
-    sessionId,
-    childStderr: () => childStderr,
-    childError: () => childError,
-    deadline,
-    closed: false,
-  };
 }
 
 async function send(session, prompt) {
@@ -218,7 +296,7 @@ async function send(session, prompt) {
       log.debug("acp: timeout");
       return { stdout: "", stderr: session.childStderr(), sessionId: session.sessionId, exitCode: 1, timedOut: true };
     }
-    throw err;
+    throw wrapAcpError(session.provider, err, session.childStderr());
   }
 }
 
@@ -255,4 +333,17 @@ async function withDeadline(promise, deadline) {
   ]);
 }
 
-module.exports = { createSession, send, closeSession, run, extractText, extractThinking, splitCommand };
+module.exports = {
+  createSession,
+  send,
+  closeSession,
+  run,
+  extractText,
+  extractThinking,
+  splitCommand,
+  isAuthError,
+  formatAuthHint,
+  wrapAcpError,
+  NonInteractiveClient,
+  CursorNonInteractiveClient,
+};

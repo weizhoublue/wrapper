@@ -45,7 +45,7 @@ function ensureFlags(command) {
 async function createSession(opts) {
   const command = ensureFlags(opts.command);
   log.debug("gemini provider: creating session command=%s resume=%s", command, opts.resume || "(none)");
-  return acp.createSession({ ...opts, command });
+  return acp.createSession({ ...opts, command, provider: "gemini" });
 }
 
 async function send(session, prompt) {

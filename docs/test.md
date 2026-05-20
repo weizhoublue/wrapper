@@ -356,3 +356,90 @@ echo $?
 
 
 ```
+
+
+
+
+
+## cursor
+
+```shell
+
+
+
+# 日志
+node src/main.js -t cursor  -d \
+  -p "查询今天上海温度"  2>/dev/null
+echo $?
+
+
+# 命令
+node src/main.js -t cursor -c 'cursor-agent --yolo'  -d \
+  -p "say hi in one word" 
+echo $?
+
+
+# 错误命令
+node src/main.js -t cursor -c "cursor-bad"  -d \
+  -p "what is your name" 
+echo $?
+
+
+
+------------------
+
+# 正则匹配
+node src/main.js -t cursor  -d \
+  -e "bingo|Bingo" \
+  -p "please say bingo in english"
+echo $?
+
+
+
+# 重试控制, 基于相同会话 重试 
+node src/main.js -t cursor -d -r 1 \
+  -e "no_bingo" \
+  -p "say hi in one word ? reply me in english"
+echo $?
+
+
+
+# 超时控制
+node src/main.js -t cursor -d -o 1 \
+  -p "please reply me after 10 seconds" 
+echo $?
+
+
+
+#  remuse 会话 
+node src/main.js -t cursor  -p "tomorrow will rain"  -d 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+cat /tmp/sid
+echo "session=${session}"
+echo "------------------"
+node src/main.js -t cursor \
+	-s ${session} \
+	-d -p  "tell me all what I have said in this session ? will it rain tomorrow "  2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+echo "session=${session}"
+
+
+
+
+
+# 重试的会话一致性
+node src/main.js -t cursor -p "what is your name" -d 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+echo "session=${session}"
+echo "------------------"
+node src/main.js -t cursor  -d \
+  -s ${session} \
+  -e "no_bingo" \
+  -p "tell me all what I have said ? reply me in english"
+echo $?
+
+
+
+
+
+```
