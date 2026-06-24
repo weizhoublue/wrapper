@@ -33,6 +33,9 @@ node src/main.js -p "hello" -d
 # 正则匹配 + 重试（调用的每个 Agent 均会在此条件下进行重试）
 node src/main.js -p "运行测试" -e "PASS" -r 5
 
+# 排除正则：stdout 命中则立即失败当前 agent（不重试），可配合 fallback
+node src/main.js -t claude -t codex -p "hello" -x "usage limit|error"
+
 # 超时控制
 node src/main.js -p "长任务" -o 30
 
@@ -49,6 +52,7 @@ node src/main.js -h
 | `-c, --command` | 否 | 跟 `-t` 联动 | 实际执行的命令（必须紧随在 `-t` 之后且每个 `-t` 仅限一个 `-c`） |
 | `-d, --debug` | 否 | 关 | 开启日志（所有级别输出到 stderr） |
 | `-e, --reg` | 否 | 空 | 正则匹配模式，不匹配则重试 |
+| `-x, --exclude` | 否 | 空 | 排除正则（仅匹配 stdout），匹配则立即宣告当前 agent 失败且不再重试 |
 | `-r, --retry` | 否 | 3 | 最大重试次数（适用于调用的每一个 Agent） |
 | `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 可用） |
 | `-o, --timeout` | 否 | 0（无超时） | 单次调用超时秒数（适用于调用的每一个 Agent） |
@@ -59,8 +63,8 @@ node src/main.js -h
 | 输出 | 内容 |
 |------|------|
 | stdout | 最终成功（或最后一个失败的）Agent 的标准输出回答文本（去首尾空行、压缩连续空行） |
-| stderr | 所有已尝试 Agent 的输出与错误汇总（带标签），倒数第二行为最终 Agent 命令名，最后一行为最终 Session ID |
-| exit code | 0 = 成功，200 = 正则不匹配，201 = 空输出，202 = 异常，203 = 超时，204 = 命令未找到 |
+| stderr | 每个 agent 固定输出 `[agent] stdout:`、`[agent] stderr:`（仅 agent 原始输出）；失败时另附 `[agent] error:`（wrapper 判定原因）。倒数第二行为最终 Agent 命令名，最后一行为 Session ID |
+| exit code | 0 = 成功，200 = 正则不匹配，201 = 空输出，202 = 异常，203 = 超时，204 = 命令未找到，205 = 排除正则匹配 |
 
 ## 使用例子
 
@@ -103,6 +107,22 @@ node src/main.js -p "运行测试" -e "PASS" -r 3
 # 重试日志会显示具体原因：regex /PASS/ not matched, output: ...
 # 退出码 200 表示正则匹配耗尽
 ```
+
+### 失败原因输出（`[agent] error:`）
+
+结构化 stderr 固定分段，便于区分 agent 输出与 wrapper 提示：
+
+```
+[cursor] stdout:
+Hello!
+[cursor] stderr:
+xxxxx
+[cursor] error:
+all 3 attempts exhausted: regex /bad/ not matched
+```
+
+- `stdout` / `stderr` 段仅含 agent 原始输出（无内容时仍保留标签行）
+- `error` 段仅含 wrapper 判定原因（无需 `-d`）
 
 ### 调试
 

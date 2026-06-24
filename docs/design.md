@@ -43,7 +43,8 @@ wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 | `-t, --type` | 否 | `claude` | provider 类型：`claude` / `codex` / `copilot` / `gemini` / `cursor`（可多次指定以进行冗余备用调用） |
 | `-c, --command` | 否 | 跟前一个 `-t` 联动 | 实际执行的命令（必须紧跟在 `-t` 之后，且每个 `-t` 最多只能有一个 `-c`） |
 | `-d, --debug` | 否 | 关 | 开启日志 |
-| `-e, --reg` | 否 | 空 | 正则匹配模式 |
+| `-e, --reg` | 否 | 空 | 正则匹配模式，不匹配则重试 |
+| `-x, --exclude` | 否 | 空 | 排除正则（仅匹配 stdout），匹配则立即宣告当前 agent 失败且不再重试 |
 | `-r, --retry` | 否 | 3 | 最大重试次数（适用于调用的每一个 Agent） |
 | `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 时可用） |
 | `-o, --timeout` | 否 | 0（无超时） | 单次超时秒数（适用于调用的每一个 Agent） |
@@ -55,7 +56,7 @@ wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 |------|------|------|
 | stdout | 最终成功（或最后一个失败的）Agent 的回答文本（去首尾空行、压缩连续空行） | 最后一个失败 Agent 的回答文本 |
 | stderr | 包含所有尝试过的 Agent 的标准输出/标准错误输出（以标签隔开），最后倒数第二行为成功（或最后一个失败的）Agent 的命令名，最后一行为最终会话 ID | 所有已尝试 Agent 的输出与错误汇总，倒数第二行为最后一个 Agent 的命令名，最后一行为会话 ID |
-| exit code | 最终成功 Agent 的退出码（通常为 0） | 最后一个 Agent 的退出码或重试耗尽退出码（200-204） |
+| exit code | 最终成功 Agent 的退出码（通常为 0） | 最后一个 Agent 的退出码或重试耗尽退出码（200-205） |
 
 ### 退出码
 
@@ -67,6 +68,7 @@ wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 | 202 | provider 异常 |
 | 203 | 超时 |
 | 204 | 命令未找到 |
+| 205 | 排除正则匹配（stdout 命中 `-x` 模式） |
 
 退出码从 200 起步，避免和 claude 命令退出码（0/1/2）冲突。
 
@@ -124,6 +126,14 @@ Copilot / Gemini 不使用 `--resume` CLI flag（该 flag 仅在交互模式下�
 2. 指定了 `-e` 且 stdout 不匹配该正则
 3. 超时不触发重试（直接退出 203）
 
+### 排除匹配（`-x`）
+
+在每次 `send` 返回后、判断是否成功/重试之前，先检查 stdout 是否命中 `-x` 排除正则（大小写不敏感）。若命中，立即宣告当前 agent 失败，不再重试；若有 fallback agent 则继续尝试下一个。
+
+### 失败原因输出
+
+结构化 stderr 固定顺序：`[agent] stdout:` → `[agent] stderr:`（仅 agent 原始输出）→ `[agent] error:`（wrapper 判定，仅失败时出现）。`error` 文案简洁，不重复 stdout 内容。
+
 ### Session 复用
 
 重试在同一 Claude session 中进行，不创建新会话。Claude 知道上一轮对话上下文，可以给出不同答案。
@@ -134,7 +144,7 @@ Copilot / Gemini 不使用 `--resume` CLI flag（该 flag 仅在交互模式下�
 
 ### 退出码
 
-重试耗尽后根据原因返回不同退出码。
+重试耗尽、排除匹配或其他失败原因返回不同退出码（含 205 排除正则匹配）。
 
 ## 冗余 Fallback 机制
 
@@ -142,7 +152,7 @@ Copilot / Gemini 不使用 `--resume` CLI flag（该 flag 仅在交互模式下�
 支持多次指定 `-t` 及紧跟其后的 `-c`。例如：`wrapper -t copilot -t codex -p "hello"`。
 1. **顺序尝试**：从第一个指定的 Agent 开始，依次尝试。
 2. **提前终止**：一旦某一个 Agent 满足成功条件（非空且匹配正则），则直接退出，后续的 Agent 将不被调用。
-3. **依次 fallback**：若当前 Agent 失败（包括会话创建失败、发送失败、超时、非零退出码或重试耗尽），则记录当前 Agent 的输出/错误后，落入下一个 Agent 重新尝试整个重试循环。
+3. **依次 fallback**：若当前 Agent 失败（包括会话创建失败、发送失败、超时、非零退出码、排除正则匹配或重试耗尽），则记录当前 Agent 的输出/错误后，落入下一个 Agent 重新尝试整个重试循环。
 4. **互斥约束**：
    - 每一个 `-c` 必须紧跟在 `-t` 之后，否则抛错。
    - 同一个 `-t` 只能指定一个 `-c`，不可重复。

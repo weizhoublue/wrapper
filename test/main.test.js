@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT } = require("../src/main");
+const { parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_EXCLUDE_MATCH } = require("../src/main");
 
 describe("parseArgs", () => {
   it("parses required -p", () => {
@@ -54,6 +54,16 @@ describe("parseArgs", () => {
     assert.strictEqual(opts.agents[0].command, "c");
     assert.strictEqual(opts.retry, 2);
     assert.strictEqual(opts.timeout, 10);
+  });
+
+  it("parses -x / --exclude", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "test", "-x", "FAIL"]);
+    assert.strictEqual(opts.exclude, "FAIL");
+  });
+
+  it("parses long --exclude form", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "test", "--exclude", "ERROR"]);
+    assert.strictEqual(opts.exclude, "ERROR");
   });
 
   it("parses -s resume", () => {
@@ -190,6 +200,10 @@ describe("exit codes", () => {
     assert.strictEqual(EXIT_PROVIDER_ERROR, 202);
     assert.strictEqual(EXIT_TIMEOUT, 203);
   });
+
+  it("has distinct EXIT_EXCLUDE_MATCH exit code", () => {
+    assert.strictEqual(EXIT_EXCLUDE_MATCH, 205);
+  });
 });
 
 describe("buildStderrOutput", () => {
@@ -221,13 +235,50 @@ describe("buildStderrOutput", () => {
     assert.ok(result.includes("cdx-err"));
   });
 
-  it("skips empty stdout/stderr sections", () => {
+  it("always labels stdout and stderr before agent name", () => {
     const result = buildStderrOutput("claude", "sid-3", [
       { commandName: "claude", stdout: "", stderr: "" },
     ]);
     const lines = result.split("\n");
     assert.strictEqual(lines[lines.length - 1], "sid-3");
     assert.strictEqual(lines[lines.length - 2], "claude");
+    assert.ok(result.includes("[claude] stdout:"));
+    assert.ok(result.includes("[claude] stderr:"));
+    assert.ok(!result.includes("[claude] error:"));
+  });
+
+  it("orders stdout, stderr, then wrapper error", () => {
+    const result = buildStderrOutput("cursor", "sid-5", [
+      {
+        commandName: "cursor",
+        stdout: "Hello!",
+        stderr: "agent stderr line",
+        wrapperError: "all 3 attempts exhausted: regex /bad/ not matched",
+      },
+    ]);
+    const stdoutIdx = result.indexOf("[cursor] stdout:");
+    const stderrIdx = result.indexOf("[cursor] stderr:");
+    const errorIdx = result.indexOf("[cursor] error:");
+    assert.ok(stdoutIdx < stderrIdx);
+    assert.ok(stderrIdx < errorIdx);
+    assert.ok(result.includes("Hello!"));
+    assert.ok(result.includes("agent stderr line"));
+    assert.ok(result.includes("all 3 attempts exhausted: regex /bad/ not matched"));
+    assert.ok(!result.includes("stdout: Hello!"));
+  });
+
+  it("includes wrapper failure reason in error section only", () => {
+    const result = buildStderrOutput("codex", "sid-4", [
+      {
+        commandName: "codex",
+        stdout: "Hello.",
+        stderr: "Reading additional input from stdin...",
+        wrapperError: "exclude regex /hello/ matched",
+      },
+    ]);
+    assert.ok(result.includes("[codex] stdout:\nHello."));
+    assert.ok(result.includes("[codex] stderr:\nReading additional input from stdin..."));
+    assert.ok(result.includes("[codex] error:\nexclude regex /hello/ matched"));
   });
 });
 

@@ -450,7 +450,22 @@ echo $?
     -t claude -c "claude-free" -t codex -t copilot -t opencode
 - 标准输出: 最后一个 Agent 的输出。
 - 错误输出: 是所有 Agent 的标准输出和错误输出。(倒数第二行是最终成功执行的 agent 名字， 倒数第一行是最终执行的 agent 的 session id )
-- 退出码: 是最后一个 Agent 的退出码。
+- 退出码: 最后一个 Agent 的退出码，或 wrapper 定义的 200–205（如 205 = 排除正则匹配）。
+
+# 10. 排除正则（-x）：命中后立即失败当前 agent，不重试
+# 若 stdout 含排除模式，期望退出码 205（单 agent 且无 fallback 时）
+node src/main.js -t claude -c "claude-deepseek-flash" -d \
+  -x "usage limit|fatal error" \
+  -r 3 \
+  -p "say hi in one word"
+echo $?  # 期望 205
+
+# 11. 排除正则 + fallback：第一个 agent 命中 exclude，第二个继续
+node src/main.js -t claude -c "claude-wrong" -t codex -d \
+  -x "fatal error" \
+  -p "say hi in one word" 2>/tmp/sid
+echo $?  # 第二个 agent 成功时为 0
+cat /tmp/sid
 
 
 
