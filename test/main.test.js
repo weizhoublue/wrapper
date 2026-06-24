@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { parseArgs, isOutputEmpty, canRetry, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT } = require("../src/main");
+const { parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT } = require("../src/main");
 
 describe("parseArgs", () => {
   it("parses required -p", () => {
@@ -11,22 +11,25 @@ describe("parseArgs", () => {
 
   it("defaults -t to claude", () => {
     const opts = parseArgs(["node", "main.js", "-p", "hi"]);
-    assert.strictEqual(opts.type, "claude");
+    assert.strictEqual(opts.agents[0].type, "claude");
+    assert.strictEqual(opts.agents[0].commandName, "claude");
   });
 
   it("resolves default command for claude type", () => {
     const opts = parseArgs(["node", "main.js", "-p", "hi"]);
-    assert.strictEqual(opts.command, "claude --dangerously-skip-permissions --permission-mode=bypassPermissions");
+    assert.strictEqual(opts.agents[0].command, "claude --dangerously-skip-permissions --permission-mode=bypassPermissions");
   });
 
   it("resolves default command for cursor type", () => {
     const opts = parseArgs(["node", "main.js", "-p", "hi", "-t", "cursor"]);
-    assert.strictEqual(opts.command, "agent --yolo --approve-mcps acp");
+    assert.strictEqual(opts.agents[0].command, "agent --yolo --approve-mcps acp");
+    assert.strictEqual(opts.agents[0].commandName, "cursor");
   });
 
   it("respects explicit -c", () => {
-    const opts = parseArgs(["node", "main.js", "-p", "hi", "-c", "my-claude"]);
-    assert.strictEqual(opts.command, "my-claude");
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "-t", "claude", "-c", "my-claude"]);
+    assert.strictEqual(opts.agents[0].command, "my-claude");
+    assert.strictEqual(opts.agents[0].commandName, "my-claude");
   });
 
   it("parses all flags", () => {
@@ -34,8 +37,8 @@ describe("parseArgs", () => {
       "-p", "test", "-t", "claude", "-c", "cc", "-d",
       "-e", "PASS", "-r", "5", "-o", "30"]);
     assert.strictEqual(opts.prompt, "test");
-    assert.strictEqual(opts.type, "claude");
-    assert.strictEqual(opts.command, "cc");
+    assert.strictEqual(opts.agents[0].type, "claude");
+    assert.strictEqual(opts.agents[0].command, "cc");
     assert.strictEqual(opts.debug, true);
     assert.strictEqual(opts.reg, "PASS");
     assert.strictEqual(opts.retry, 5);
@@ -47,6 +50,8 @@ describe("parseArgs", () => {
       "--prompt", "hi", "--type", "claude", "--command", "c",
       "--debug", "--reg", "OK", "--retry", "2", "--timeout", "10"]);
     assert.strictEqual(opts.prompt, "hi");
+    assert.strictEqual(opts.agents[0].type, "claude");
+    assert.strictEqual(opts.agents[0].command, "c");
     assert.strictEqual(opts.retry, 2);
     assert.strictEqual(opts.timeout, 10);
   });
@@ -68,6 +73,56 @@ describe("parseArgs", () => {
 
   it("throws on missing -p when args present", () => {
     assert.throws(() => parseArgs(["node", "main.js", "-t", "codex"]), /required option.*prompt/i);
+  });
+});
+
+describe("parseArgs multi-agent", () => {
+  it("parses multiple -t into agents array", () => {
+    const opts = parseArgs(["node", "main.js", "-t", "copilot", "-t", "codex", "-p", "hi"]);
+    assert.strictEqual(opts.agents.length, 2);
+    assert.strictEqual(opts.agents[0].type, "copilot");
+    assert.strictEqual(opts.agents[0].commandName, "copilot");
+    assert.strictEqual(opts.agents[1].type, "codex");
+    assert.strictEqual(opts.agents[1].commandName, "codex");
+  });
+
+  it("pairs -c with preceding -t", () => {
+    const opts = parseArgs(["node", "main.js", "-t", "claude", "-c", "claude-deepseek", "-t", "copilot", "-p", "hi"]);
+    assert.strictEqual(opts.agents[0].command, "claude-deepseek");
+    assert.strictEqual(opts.agents[0].commandName, "claude-deepseek");
+    assert.strictEqual(opts.agents[1].commandName, "copilot");
+  });
+
+  it("uses default command when no -c", () => {
+    const opts = parseArgs(["node", "main.js", "-t", "codex", "-t", "copilot", "-p", "hi"]);
+    assert.strictEqual(opts.agents[0].command, "codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check");
+    assert.ok(opts.agents[1].command.includes("copilot"));
+  });
+
+  it("errors on -c before any -t", () => {
+    assert.throws(() => parseArgs(["node", "main.js", "-c", "cmd", "-t", "claude", "-p", "hi"]),
+      /-c\/--command must follow a -t\/--type option/);
+  });
+
+  it("errors on -c separated from -t by other options", () => {
+    assert.throws(() => parseArgs(["node", "main.js", "-t", "claude", "-r", "3", "-c", "cmd", "-p", "hi"]),
+      /-c\/--command must immediately follow -t\/--type/);
+  });
+
+  it("errors on duplicate -c for same -t", () => {
+    assert.throws(() => parseArgs(["node", "main.js", "-t", "claude", "-c", "a", "-c", "b", "-p", "hi"]),
+      /duplicate -c\/--command for -t/);
+  });
+
+  it("errors on resume with multiple agents", () => {
+    assert.throws(() => parseArgs(["node", "main.js", "-t", "copilot", "-t", "codex", "-s", "abc", "-p", "hi"]),
+      /--resume cannot be used with multiple agents/);
+  });
+
+  it("allows resume with single agent", () => {
+    const opts = parseArgs(["node", "main.js", "-t", "claude", "-s", "abc", "-p", "hi"]);
+    assert.strictEqual(opts.resume, "abc");
+    assert.strictEqual(opts.agents.length, 1);
   });
 });
 
@@ -136,3 +191,43 @@ describe("exit codes", () => {
     assert.strictEqual(EXIT_TIMEOUT, 203);
   });
 });
+
+describe("buildStderrOutput", () => {
+  it("single agent output with agentCommandName and sessionId", () => {
+    const result = buildStderrOutput("claude", "sid-1", [
+      { commandName: "claude", stdout: "", stderr: "some error" },
+    ]);
+    assert.ok(result.endsWith("sid-1"));
+    const lines = result.split("\n");
+    assert.strictEqual(lines[lines.length - 1], "sid-1");
+    assert.strictEqual(lines[lines.length - 2], "claude");
+  });
+
+  it("multi agent output aggregates all results with labels", () => {
+    const result = buildStderrOutput("codex", "sid-2", [
+      { commandName: "copilot", stdout: "cop-out", stderr: "cop-err" },
+      { commandName: "codex", stdout: "", stderr: "cdx-err" },
+    ]);
+    const lines = result.split("\n");
+    // 最后两行
+    assert.strictEqual(lines[lines.length - 1], "sid-2");
+    assert.strictEqual(lines[lines.length - 2], "codex");
+    // 包含分隔标记
+    assert.ok(result.includes("[copilot] stderr:"));
+    assert.ok(result.includes("cop-err"));
+    assert.ok(result.includes("[copilot] stdout:"));
+    assert.ok(result.includes("cop-out"));
+    assert.ok(result.includes("[codex] stderr:"));
+    assert.ok(result.includes("cdx-err"));
+  });
+
+  it("skips empty stdout/stderr sections", () => {
+    const result = buildStderrOutput("claude", "sid-3", [
+      { commandName: "claude", stdout: "", stderr: "" },
+    ]);
+    const lines = result.split("\n");
+    assert.strictEqual(lines[lines.length - 1], "sid-3");
+    assert.strictEqual(lines[lines.length - 2], "claude");
+  });
+});
+

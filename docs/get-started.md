@@ -12,25 +12,31 @@ make build          # 构建 4 平台二进制到 dist/
 ## 基本用法
 
 ```bash
-# 发送 prompt
+# 发送 prompt (默认使用 claude)
 node src/main.js -p "分析项目架构"
 
-# 自定义命令
-node src/main.js -p "hello" -c "claude-free-remote"
+# 自定义命令 (必须紧跟在 -t 之后)
+node src/main.js -t claude -c "claude-free-remote" -p "hello"
 
-# 恢复会话
-node src/main.js -p "continue" -s <session-id>
+# 多 Agent 冗余调用
+node src/main.js -t copilot -t codex -p "say hi in one word"
+
+# 多 Agent 自定义命令调用
+node src/main.js -t claude -c "claude-deepseek" -t claude -c "claude-deepseek-flash" -p "hello"
+
+# 恢复会话 (仅支持单 Agent)
+node src/main.js -t claude -s <session-id> -p "continue"
 
 # 开启 debug 日志
 node src/main.js -p "hello" -d
 
-# 正则匹配 + 重试（复用同一 session）
+# 正则匹配 + 重试（调用的每个 Agent 均会在此条件下进行重试）
 node src/main.js -p "运行测试" -e "PASS" -r 5
 
 # 超时控制
 node src/main.js -p "长任务" -o 30
 
-# 查看帮助
+# 查看帮助 (中文帮助信息)
 node src/main.js -h
 ```
 
@@ -39,21 +45,21 @@ node src/main.js -h
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
 | `-p, --prompt` | 是 | - | 用户提示词 |
-| `-t, --type` | 否 | `claude` | provider 类型：claude / codex / copilot / gemini / cursor |
-| `-c, --command` | 否 | 跟 `-t` 联动 | 实际执行的命令，支持带参数如 `"claude --resume id"` |
+| `-t, --type` | 否 | `claude` | provider 类型：claude / codex / copilot / gemini / cursor（可指定多次以实现冗余调用） |
+| `-c, --command` | 否 | 跟 `-t` 联动 | 实际执行的命令（必须紧随在 `-t` 之后且每个 `-t` 仅限一个 `-c`） |
 | `-d, --debug` | 否 | 关 | 开启日志（所有级别输出到 stderr） |
 | `-e, --reg` | 否 | 空 | 正则匹配模式，不匹配则重试 |
-| `-r, --retry` | 否 | 3 | 最大重试次数 |
-| `-s, --resume` | 否 | 空 | 恢复已有 session ID |
-| `-o, --timeout` | 否 | 0（无超时） | 单次调用超时秒数 |
-| `-h, --help` | 否 | - | 输出帮助信息 |
+| `-r, --retry` | 否 | 3 | 最大重试次数（适用于调用的每一个 Agent） |
+| `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 可用） |
+| `-o, --timeout` | 否 | 0（无超时） | 单次调用超时秒数（适用于调用的每一个 Agent） |
+| `-h, --help` | 否 | - | 输出中文帮助信息 |
 
 ## 输出
 
 | 输出 | 内容 |
 |------|------|
-| stdout | Claude 的回答文本（自动去除首尾空行、压缩连续空行） |
-| stderr | 思考过程 + 最后一行 session ID |
+| stdout | 最终成功（或最后一个失败的）Agent 的标准输出回答文本（去首尾空行、压缩连续空行） |
+| stderr | 所有已尝试 Agent 的输出与错误汇总（带标签），倒数第二行为最终 Agent 命令名，最后一行为最终 Session ID |
 | exit code | 0 = 成功，200 = 正则不匹配，201 = 空输出，202 = 异常，203 = 超时，204 = 命令未找到 |
 
 ## 使用例子

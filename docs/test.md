@@ -438,8 +438,57 @@ node src/main.js -t cursor  -d \
   -p "tell me all what I have said ? reply me in english"
 echo $?
 
+```
+
+
+## 多 Agent Fallback (冗余调用)
+
+```shell
+
+多个 -t agent 类型，实现多个 agent 的 fallback 调用
+- -t 选项后跟 0 个或者 1 个 -c 选项。实现 配对 解析  
+    -t claude -c "claude-free" -t codex -t copilot -t opencode
+- 标准输出: 最后一个 Agent 的输出。
+- 错误输出: 是所有 Agent 的标准输出和错误输出。(倒数第二行是最终成功执行的 agent 名字， 倒数第一行是最终执行的 agent 的 session id )
+- 退出码: 是最后一个 Agent 的退出码。
 
 
 
+npm install
+npm run build
+
+# 1. 如果第一个 claude 失败了，会尝试下一个 codex
+node src/main.js -t claude -c "claude-deepseek-flash" -t codex  -d -p  "say hi in one word" 2>/tmp/sid
+echo ""
+echo $?
+agentName=$( sed '$d' /tmp/sid | sed -n '$p' )
+session=$(tail -1 /tmp/sid)
+echo "succeeded agent=${agentName}"
+echo "session id=${session}"
+
+
+# 2. 第一个 失败， fallback 到第二个
+node src/main.js -t claude -c "claude-wrong" -t claude -c  "claude-deepseek-flash" -d -p  "say hi in one word" 2>/tmp/sid
+echo ""
+echo $?
+cat /tmp/sid
+
+node src/main.js  -t copilot -t codex -d -p "say hi in one word" -e 'hi' 2>/tmp/sid
+echo ""
+echo $?
+cat /tmp/sid
+
+
+# 3. 错误校验：-t 后只能最多接 一个  -c 选项（抛错并退出 2）
+node src/main.js -t claude -c cmd1 -c cmd2 -p "hello"
+echo $?
+
+# 4. 错误校验：-c 和 -t 之间不能被其他选项截断（抛错并退出 2）
+node src/main.js -c cmd -t claude -p "hello"
+echo $?
+
+# 5. 错误校验：多 Agent 场景下, 不再支持  -s resume（抛错并退出 2）
+node src/main.js -t copilot -t codex -s "some-id" -p "hello"
+echo $?
 
 ```

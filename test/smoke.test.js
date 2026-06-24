@@ -35,7 +35,7 @@ describe("wrapper smoke", () => {
   });
 
   it("accepts custom command", { skip: !hasClaude }, async () => {
-    const result = await runCommu(["-p", "say yes", "-c", "claude"]);
+    const result = await runCommu(["-t", "claude", "-c", "claude", "-p", "say yes"]);
     assert.strictEqual(result.code, 0);
   });
 

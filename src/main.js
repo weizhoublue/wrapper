@@ -2,6 +2,22 @@
 const { parseArgs: nodeParseArgs } = require("node:util");
 const log = require("./log");
 
+function splitCommand(cmd) {
+  const parts = cmd.trim().split(/\s+/);
+  return { command: parts[0], args: parts.slice(1) };
+}
+
+function which(cmd) {
+  const { spawnSync } = require("child_process");
+  try {
+    const result = spawnSync("which", [cmd], { stdio: "pipe" });
+    return result.status === 0 ? result.stdout.toString().trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+
 const DEFAULTS = {
   claude: "claude --dangerously-skip-permissions --permission-mode=bypassPermissions",
   codex: "codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
@@ -10,29 +26,31 @@ const DEFAULTS = {
   cursor: "agent --yolo --approve-mcps acp",
 };
 
-const HELP = `Usage: wrapper -p <prompt> [options]
+const HELP = `用法: wrapper -p <提示词> [选项]
 
-One-shot CLI wrapper for AI coding agents.
+一次性 AI 编码代理 CLI 封装器。
 
-Required:
-  -p, --prompt <text>     User prompt
+必填:
+  -p, --prompt <文本>     用户提示词
 
-Options:
-  -t, --type <name>       Provider type: claude, codex, copilot, gemini, cursor (default: claude)
-  -c, --command <cmd>     Command to execute (default: depends on -t)
-  -d, --debug             Enable debug logging to stderr
-  -e, --reg <pattern>     Regex pattern to match against output
-  -r, --retry <n>         Max retry count (default: 3)
-  -s, --resume <id>       Resume a previous session
-  -o, --timeout <sec>     Timeout in seconds (default: 0, no timeout)
-  -h, --help              Show this help
+选项:
+  -t, --type <名称>        代理类型: claude, codex, copilot, gemini, cursor (默认: claude)
+                          可多次指定该选项，实现 fallback 调用 agent
+  -c, --command <命令>     执行命令 (须紧跟 -t 之后，默认根据 -t 决定)
+  -d, --debug             开启调试日志输出到 stderr
+  -e, --reg <模式>         用于匹配输出的正则表达式(大小写不敏感)，如果不匹配则会重试运行命令 
+  -r, --retry <次数>       每个 agent 最大重试次数 (默认: 3)。如果多次指定 -t，则每个 agent 都会独立重试。
+  -s, --resume <id>       恢复之前的会话（不能同多次调用 -t 配合）
+  -o, --timeout <秒>      单次调用 agent 的超时时间，如果超时，则会尝试重新调用。单位秒 (默认: 0，不限时)
+  -h, --help              显示此帮助
+  -v, --version           显示版本号
 
-Output:
-  stdout  = child process stdout
-  stderr  = child process stderr + session ID (last line)
-  exit code = child process exit code
+输出:
+  stdout  = 最后一个 agent 的标准输出
+  stderr  = 所有 agent 的标准输出和错误输出 + 最终成功的 agent 名字 (倒数第二行) + 会话 ID (最后一行)
+  退出码   = 最后一个 agent 的退出码
 
-Examples:
+例子:
   wrapper -t claude -c "claude-free" -p "say hi in one word"
 
   wrapper -t claude -c "claude-free" -e "bingo|Bingo" -p "please say bingo in english"
@@ -40,6 +58,11 @@ Examples:
   wrapper -t claude -c "claude-free" -p "tomorow will rain" 2>/tmp/sid
   session=$(tail -1 /tmp/sid)
   wrapper -t claude -c "claude-free" -s \${session} -p "tell me all what I have said in this session"
+
+多 agent fallback 例子:
+  wrapper -t claude -c "claude-deepseek-flash" -t codex -t copilot -d -p  "say hi in one word" 2>/tmp/sid
+  agentName=$( sed '$d' /tmp/sid | sed -n '$p' )
+  session=$(tail -1 /tmp/sid)
 
 codex:
   wrapper -t codex -p "say hi in one word"
@@ -68,17 +91,72 @@ debug:
 function parseArgs(argv) {
   const args = argv.slice(2);
 
+  if (args.includes("-v") || args.includes("--version")) {
+    const pkg = require("../package.json");
+    process.stdout.write(pkg.version + "\n");
+    process.exit(0);
+  }
+
   if (args.length === 0 || args.includes("-h") || args.includes("--help")) {
     process.stdout.write(HELP + "\n");
     process.exit(0);
   }
 
+  // Phase 1: manual scan to extract -t/-c pairs
+  const agents = [];
+  const remainingArgs = [];
+  let lastToken = null; // tracks whether previous token was -t <value>
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === "-t" || arg === "--type") {
+      const value = args[++i];
+      if (!value) throw new Error("missing value for -t/--type");
+      agents.push({ type: value, command: null, commandName: value });
+      lastToken = "type";
+      continue;
+    }
+
+    if (arg === "-c" || arg === "--command") {
+      const value = args[++i];
+      if (!value) throw new Error("missing value for -c/--command");
+      if (agents.length === 0) {
+        throw new Error("-c/--command must follow a -t/--type option");
+      }
+      if (lastToken !== "type") {
+        if (agents[agents.length - 1].command !== null) {
+          throw new Error(`duplicate -c/--command for -t ${agents[agents.length - 1].type}`);
+        }
+        throw new Error("-c/--command must immediately follow -t/--type");
+      }
+      agents[agents.length - 1].command = value;
+      agents[agents.length - 1].commandName = value;
+      lastToken = "command";
+      continue;
+    }
+
+    remainingArgs.push(arg);
+    lastToken = "other";
+  }
+
+  // Default to claude when no -t specified
+  if (agents.length === 0) {
+    agents.push({ type: "claude", command: null, commandName: "claude" });
+  }
+
+  // Resolve default commands
+  for (const agent of agents) {
+    if (agent.command === null) {
+      agent.command = DEFAULTS[agent.type] || agent.type;
+    }
+  }
+
+  // Phase 2: parse remaining options
   const { values } = nodeParseArgs({
-    args,
+    args: remainingArgs,
     options: {
       prompt:    { type: "string", short: "p" },
-      type:      { type: "string", short: "t", default: "claude" },
-      command:   { type: "string", short: "c" },
       debug:     { type: "boolean", short: "d", default: false },
       reg:       { type: "string", short: "e" },
       retry:     { type: "string", short: "r", default: "3" },
@@ -92,19 +170,22 @@ function parseArgs(argv) {
     throw new Error("required option '--prompt, -p' not specified. Use -h for help.");
   }
 
-  const command = values.command || DEFAULTS[values.type] || values.type;
   const retry = parseInt(values.retry, 10);
   const timeout = parseInt(values.timeout, 10);
+  const resume = values.resume || "";
+
+  if (agents.length > 1 && resume) {
+    throw new Error("--resume cannot be used with multiple agents");
+  }
 
   return {
     prompt: values.prompt,
-    type: values.type,
-    command,
     debug: values.debug,
     reg: values.reg || "",
     retry: Number.isNaN(retry) ? 3 : retry,
-    resume: values.resume || "",
+    resume,
     timeout: Number.isNaN(timeout) ? 0 : timeout,
+    agents,
   };
 }
 
@@ -118,9 +199,21 @@ function canRetry(stdout, regex) {
   return false;
 }
 
-function buildStderrOutput(sessionId, childStderr) {
+function buildStderrOutput(agentCommandName, sessionId, agentResults) {
   const parts = [];
-  if (childStderr) parts.push(childStderr);
+
+  for (const r of agentResults) {
+    if (r.stderr) {
+      parts.push(`[${r.commandName}] stderr:`);
+      parts.push(r.stderr);
+    }
+    if (r.stdout) {
+      parts.push(`[${r.commandName}] stdout:`);
+      parts.push(r.stdout);
+    }
+  }
+
+  if (agentCommandName) parts.push(agentCommandName);
   if (sessionId) parts.push(sessionId);
   return parts.join("\n");
 }
@@ -145,9 +238,23 @@ function retryReason(stdout, regex) {
 async function main() {
   const opts = parseArgs(process.argv);
 
+  // Validate custom commands existence early
+  for (const agent of opts.agents) {
+    if (agent.command !== DEFAULTS[agent.type] && agent.command !== agent.type) {
+      const { command: cmd } = splitCommand(agent.command);
+      if (!which(cmd)) {
+        process.stderr.write(`Error: command not found: ${cmd}\n`);
+        process.exit(EXIT_COMMAND_NOT_FOUND);
+      }
+    }
+  }
+
   if (opts.debug) log.setDebug(true);
 
-  log.info("wrapper starting: type=%s command=%s", opts.type, opts.command);
+  log.info("wrapper starting: agents=%d", opts.agents.length);
+  for (const a of opts.agents) {
+    log.debug("  agent type=%s command=%s commandName=%s", a.type, a.command, a.commandName);
+  }
   log.debug("prompt=%s timeout=%ds retry=%d reg=%s",
     opts.prompt.slice(0, 100), opts.timeout, opts.retry, opts.reg || "(none)");
 
@@ -158,93 +265,176 @@ async function main() {
     gemini: require("./provider/gemini"),
     cursor: require("./provider/cursor"),
   };
-  const provider = providers[opts.type];
-  if (!provider) {
-    log.error("unknown provider type: %s", opts.type);
-    process.exit(EXIT_PROVIDER_ERROR);
-  }
 
-  const regex = opts.reg ? new RegExp(opts.reg) : null;
-  let lastResult = null;
+  const regex = opts.reg ? new RegExp(opts.reg, "i") : null;
+  const allResults = []; // { commandName, stdout, stderr, sessionId, ... }
 
-  // Create session once — reuse across retries
-  let session;
-  try {
-    session = await provider.createSession({
-      command: opts.command,
-      timeout: opts.timeout,
-      resume: opts.resume,
-    });
-  } catch (err) {
-    log.error("failed to create session: %s", err.message);
-    process.exit(err.message.startsWith("command not found") ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR);
-  }
-
-  try {
-    for (let attempt = 0; attempt <= opts.retry; attempt++) {
-      log.info("attempt %d/%d session=%s", attempt + 1, opts.retry + 1, session.sessionId || "(pending)");
-
-      try {
-        lastResult = await provider.send(session, opts.prompt);
-      } catch (err) {
-        log.error("provider send failed: %s", err.message);
-        await provider.closeSession(session);
-        const out = collapseBlankLines(lastResult?.stdout || "");
-        process.stdout.write(out);
-        if (!out.endsWith("\n")) process.stdout.write("\n");
-        process.stderr.write(buildStderrOutput(lastResult?.sessionId, err.message) + "\n");
-        process.exit(EXIT_PROVIDER_ERROR);
-      }
-
-      if (lastResult.timedOut) {
-        log.error("attempt %d: timed out after %ds", attempt + 1, opts.timeout);
-        await provider.closeSession(session);
-        const out = collapseBlankLines(lastResult.stdout || "");
-        process.stdout.write(out);
-        if (!out.endsWith("\n")) process.stdout.write("\n");
-        process.stderr.write(buildStderrOutput(lastResult.sessionId, lastResult.stderr) + "\n");
-        process.exit(EXIT_TIMEOUT);
-      }
-
-      if (!canRetry(lastResult.stdout, regex)) {
-        await provider.closeSession(session);
-        const out = collapseBlankLines(lastResult.stdout);
-        process.stdout.write(out);
-        if (!out.endsWith("\n")) process.stdout.write("\n");
-        process.stderr.write(buildStderrOutput(lastResult.sessionId, lastResult.stderr) + "\n");
-        process.exit(lastResult.exitCode || EXIT_OK);
-      }
-
-      log.info("attempt %d: retry needed — %s", attempt + 1, retryReason(lastResult.stdout, regex));
-      log.debug("attempt %d stdout:\n%s", attempt + 1, lastResult.stdout || "(empty)");
-      log.debug("attempt %d stderr:\n%s", attempt + 1, lastResult.stderr || "(empty)");
+  for (let agentIdx = 0; agentIdx < opts.agents.length; agentIdx++) {
+    const agent = opts.agents[agentIdx];
+    const provider = providers[agent.type];
+    if (!provider) {
+      process.stderr.write(`Error: unknown provider type: ${agent.type}\n`);
+      process.exit(EXIT_PROVIDER_ERROR);
     }
 
-    // all retries exhausted
-    const reason = retryReason(lastResult.stdout, regex);
-    log.error("all %d attempts exhausted: %s", opts.retry + 1, reason);
+    log.info("trying agent %d/%d: %s (%s)", agentIdx + 1, opts.agents.length, agent.commandName, agent.type);
 
-    await provider.closeSession(session);
-    const out = collapseBlankLines(lastResult.stdout || "");
-    process.stdout.write(out);
-    if (!out.endsWith("\n")) process.stdout.write("\n");
-    process.stderr.write(buildStderrOutput(lastResult.sessionId, lastResult.stderr) + "\n");
+    let session;
+    try {
+      session = await provider.createSession({
+        command: agent.command,
+        timeout: opts.timeout,
+        resume: opts.resume,
+      });
+    } catch (err) {
+      log.error("failed to create session for %s: %s", agent.commandName, err.message);
+      allResults.push({
+        commandName: agent.commandName,
+        stdout: "",
+        stderr: err.message,
+        sessionId: "",
+        sessionCreationFailed: true,
+        commandNotFound: err.message.startsWith("command not found"),
+      });
+      if (agentIdx < opts.agents.length - 1) {
+        log.error("agent %s failed, falling back to next agent", agent.commandName);
+        continue;
+      }
+      // last agent — exit
+      process.stdout.write("\n");
+      process.stderr.write(buildStderrOutput(agent.commandName, "", allResults) + "\n");
+      process.exit(err.message.startsWith("command not found") ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR);
+    }
 
-    const exitCode = isOutputEmpty(lastResult.stdout) ? EXIT_EMPTY_OUTPUT
-      : (regex ? EXIT_REGEX_MISMATCH : EXIT_OK);
-    process.exit(exitCode || EXIT_PROVIDER_ERROR);
-  } catch (err) {
-    try { await provider.closeSession(session); } catch {}
-    log.error("unexpected error: %s", err.message);
-    process.exit(EXIT_PROVIDER_ERROR);
+    let lastResult = null;
+    let agentSuccess = false;
+    let agentDone = false; // whether broke retry loop due to timeout/error/non-zero exit
+
+    try {
+      const maxAttempts = Math.max(1, opts.retry);
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        log.info("agent %s attempt %d/%d session=%s", agent.commandName, attempt + 1, maxAttempts, session.sessionId || "(pending)");
+
+        try {
+          lastResult = await provider.send(session, opts.prompt);
+        } catch (err) {
+          log.error("provider send failed for %s: %s", agent.commandName, err.message);
+          allResults.push({
+            commandName: agent.commandName,
+            stdout: lastResult?.stdout || "",
+            stderr: err.message,
+            sessionId: session?.sessionId || "",
+            sendFailed: true,
+          });
+          agentDone = true;
+          break; // fallback to next agent
+        }
+
+        if (lastResult.timedOut) {
+          log.error("agent %s attempt %d: timed out after %ds", agent.commandName, attempt + 1, opts.timeout);
+          allResults.push({
+            commandName: agent.commandName,
+            stdout: lastResult.stdout || "",
+            stderr: lastResult.stderr || "",
+            sessionId: session.sessionId || lastResult.sessionId || "",
+            timedOut: true,
+          });
+          agentDone = true;
+          break; // fallback to next agent
+        }
+
+        if (lastResult.exitCode && lastResult.exitCode !== 0) {
+          log.error("agent %s attempt %d: non-zero exit code %d", agent.commandName, attempt + 1, lastResult.exitCode);
+          allResults.push({
+            commandName: agent.commandName,
+            stdout: lastResult.stdout || "",
+            stderr: lastResult.stderr || "",
+            sessionId: session.sessionId || lastResult.sessionId || "",
+            exitCode: lastResult.exitCode,
+          });
+          agentDone = true;
+          break; // fallback to next agent
+        }
+
+        if (!canRetry(lastResult.stdout, regex)) {
+          // success
+          agentSuccess = true;
+          allResults.push({
+            commandName: agent.commandName,
+            stdout: lastResult.stdout || "",
+            stderr: lastResult.stderr || "",
+            sessionId: session.sessionId || lastResult.sessionId || "",
+          });
+          break;
+        }
+
+        log.error("agent %s attempt %d: retry needed — %s", agent.commandName, attempt + 1, retryReason(lastResult.stdout, regex));
+        log.debug("attempt %d stdout:\n%s", attempt + 1, lastResult.stdout || "(empty)");
+        log.debug("attempt %d stderr:\n%s", attempt + 1, lastResult.stderr || "(empty)");
+      }
+
+      // retry exhausted but not marked agentDone
+      if (!agentSuccess && !agentDone) {
+        log.error("agent %s: all %d attempts exhausted: %s", agent.commandName, maxAttempts, retryReason(lastResult.stdout, regex));
+        allResults.push({
+          commandName: agent.commandName,
+          stdout: lastResult?.stdout || "",
+          stderr: lastResult?.stderr || "",
+          sessionId: session.sessionId || lastResult?.sessionId || "",
+          exhausted: true,
+        });
+      }
+    } finally {
+      try { await provider.closeSession(session); } catch {}
+    }
+
+    if (agentSuccess) {
+      const out = collapseBlankLines(lastResult.stdout);
+      process.stdout.write(out);
+      if (!out.endsWith("\n")) process.stdout.write("\n");
+      process.stderr.write(buildStderrOutput(agent.commandName, lastResult.sessionId || session.sessionId, allResults) + "\n");
+      process.exit(lastResult.exitCode || EXIT_OK);
+    }
+
+    log.error("agent %s failed, %s", agent.commandName,
+      agentIdx < opts.agents.length - 1 ? "falling back to next agent" : "no more agents");
   }
+
+  // all agents failed
+  const lastAgent = opts.agents[opts.agents.length - 1];
+  const lastAgentResult = allResults[allResults.length - 1];
+  const out = collapseBlankLines(lastAgentResult?.stdout || "");
+  process.stdout.write(out);
+  if (!out.endsWith("\n")) process.stdout.write("\n");
+  process.stderr.write(buildStderrOutput(lastAgent.commandName, lastAgentResult?.sessionId || "", allResults) + "\n");
+
+  if (lastAgentResult) {
+    if (lastAgentResult.sessionCreationFailed) {
+      process.exit(lastAgentResult.commandNotFound ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR);
+    }
+    if (lastAgentResult.sendFailed) {
+      process.exit(EXIT_PROVIDER_ERROR);
+    }
+    if (lastAgentResult.timedOut) {
+      process.exit(EXIT_TIMEOUT);
+    }
+    if (lastAgentResult.exitCode && lastAgentResult.exitCode !== 0) {
+      process.exit(lastAgentResult.exitCode);
+    }
+    if (lastAgentResult.exhausted) {
+      const exitCode = isOutputEmpty(lastAgentResult.stdout) ? EXIT_EMPTY_OUTPUT
+        : (regex ? EXIT_REGEX_MISMATCH : EXIT_OK);
+      process.exit(exitCode);
+    }
+  }
+  process.exit(EXIT_PROVIDER_ERROR);
 }
 
 if (require.main === module) {
   main().catch((err) => {
-    log.error("fatal: %s", err.message);
+    process.stderr.write(`Error: ${err.message}\n`);
     process.exit(2);
   });
 }
 
-module.exports = { parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND };
+module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND };
