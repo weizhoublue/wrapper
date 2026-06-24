@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { extractText, extractThinking, splitCommand } = require("../../src/provider/acp");
+const { extractText, extractThinking, inferAcpExitCode, splitCommand } = require("../../src/provider/acp");
 
 describe("ACP - extractText", () => {
   it("extracts text from agent_message_chunk notifications", () => {
@@ -150,6 +150,61 @@ describe("ACP - extractThinking", () => {
       },
     ];
     assert.strictEqual(extractThinking(notifications, null), "");
+  });
+});
+
+describe("ACP - inferAcpExitCode", () => {
+  it("returns 0 for successful end_turn with normal output", () => {
+    assert.strictEqual(
+      inferAcpExitCode("copilot", { stopReason: "end_turn" }, "hello", "", ""),
+      0,
+    );
+  });
+
+  it("returns 1 for non-end_turn stopReason", () => {
+    assert.strictEqual(
+      inferAcpExitCode("copilot", { stopReason: "refusal" }, "no", "", ""),
+      1,
+    );
+  });
+
+  it("returns 1 when stdout starts with Error:", () => {
+    assert.strictEqual(
+      inferAcpExitCode(
+        "copilot",
+        { stopReason: "end_turn" },
+        "Error: You have exceeded your monthly quota (Request ID: x)",
+        "",
+        "",
+      ),
+      1,
+    );
+  });
+
+  it("returns 1 when stdout starts with provider limit message", () => {
+    assert.strictEqual(
+      inferAcpExitCode(
+        "copilot",
+        { stopReason: "end_turn" },
+        "You have exceeded your monthly quota (Request ID: x)",
+        "",
+        "",
+      ),
+      1,
+    );
+  });
+
+  it("returns 0 when limit phrase appears only mid-output", () => {
+    assert.strictEqual(
+      inferAcpExitCode(
+        "copilot",
+        { stopReason: "end_turn" },
+        "Docs mention You have exceeded your monthly quota in billing FAQ.",
+        "",
+        "",
+      ),
+      0,
+    );
   });
 });
 

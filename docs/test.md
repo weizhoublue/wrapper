@@ -188,9 +188,10 @@ npm install
 
 # 基本
 node src/main.js -t copilot  \
-  -p "say hi in one word"  2>/dev/null
+  -p "say hi in one word"  2>/tmp/a
 echo $?  
-
+echo 
+cat /tmp/a
 
 # 日志
 node src/main.js -t copilot  -d \

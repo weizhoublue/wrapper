@@ -39,14 +39,14 @@ agent --yolo --approve-mcps acp
 agy --dangerously-skip-permissions 
 ```
 
-| Provider | 通信方式 | npm 依赖 | 自动注入 flag | Resume（`-s`） |
-|----------|---------|----------|-------------|-----------------|
-| Claude | `@anthropic-ai/claude-agent-sdk` | `claude-agent-sdk` | `--dangerously-skip-permissions`, `--permission-mode=bypassPermissions`（SDK option 同步设置） | `--resume <id>` CLI flag |
-| Codex | spawn `codex exec` + NDJSON | 无 | `--json`, `--dangerously-bypass-approvals-and-sandbox`, `--skip-git-repo-check` | `exec resume <id>` 子命令 |
-| Copilot | `@agentclientprotocol/sdk` (ACP) | `agentclientprotocol/sdk` | `--acp`, `--allow-all-tools`, `--allow-all-paths`, `--allow-all-urls`, `--no-ask-user` | ACP `session/load` 协议方法 |
-| Gemini | `@agentclientprotocol/sdk` (ACP) | `agentclientprotocol/sdk` | `--acp`, `--approval-mode=yolo`, `--skip-trust` | ACP `session/load` 协议方法 |
-| Cursor | `@agentclientprotocol/sdk` (ACP) | `agentclientprotocol/sdk` | `--yolo`, `--approve-mcps`, `acp` | ACP `session/load` 协议方法 |
-| agy | spawn `agy --print` + log 提取 | 无 | `--dangerously-skip-permissions`, `--log-file`, `--print` | `--conversation <id>` CLI flag |
+| Provider | 通信方式 | npm 依赖 | 自动注入 flag | Resume（`-s`） | 退出码来源 |
+|----------|---------|----------|-------------|-----------------|-----------|
+| Claude | Agent SDK | `claude-agent-sdk` | `--dangerously-skip-permissions`, `--permission-mode=bypassPermissions`（SDK option 同步设置） | `--resume <id>` CLI flag | `result.subtype === "success" ? 0 : 1` |
+| Codex | spawn 子进程 + NDJSON | 无 | `--json`, `--dangerously-bypass-approvals-and-sandbox`, `--skip-git-repo-check` | `exec resume <id>` 子命令 | 真实 OS 退出码 |
+| Copilot | ACP | `agentclientprotocol/sdk` | `--acp`, `--allow-all-tools`, `--allow-all-paths`, `--allow-all-urls`, `--no-ask-user` | ACP `session/load` 协议方法 | `inferAcpExitCode()` + 子进程码 |
+| Gemini | ACP | `agentclientprotocol/sdk` | `--acp`, `--approval-mode=yolo`, `--skip-trust` | ACP `session/load` 协议方法 | 同上 |
+| Cursor | ACP | `agentclientprotocol/sdk` | `--yolo`, `--approve-mcps`, `acp` | ACP `session/load` 协议方法 | 同上 |
+| agy | spawn 子进程 + log 提取 | 无 | `--dangerously-skip-permissions`, `--log-file`, `--print` | `--conversation <id>` CLI flag | 真实 OS 退出码 |
 
 ## Claude
 
@@ -216,6 +216,20 @@ Copilot CLI **原生支持 ACP**。`copilot --acp` 进入 ACP server 模式，�
 | npm 包 | `@agentclientprotocol/sdk` |
 | 当前版本 | `^0.21.1`（见 `package.json`） |
 | 协议版本 | `PROTOCOL_VERSION = 1` |
+
+### 退出码（ACP 共享，Copilot / Gemini / Cursor）
+
+ACP prompt RPC 成功时，agent CLI 子进程通常仍在运行，**不会**自动把 shell 退出码交给 wrapper。`acp.js` 的 `inferAcpExitCode()` 为每次 prompt 推断 `exitCode`：
+
+| 信号 | exitCode |
+|------|----------|
+| `stopReason !== end_turn`（如 `refusal`、`max_tokens`） | 1 |
+| stdout/stderr 以 `Error:` 开头 | 1 |
+| stdout/stderr **行首**命中该 provider 的 `LimitMsg` 模式 | 1 |
+| 子进程在 session 期间退出 | 透传子进程码 |
+| 否则 | 0 |
+
+wrapper 的 `-q` 配额检测在 **`exitCode !== 0` 且全文命中 `LimitMsg`** 时才判定为 206，避免正常回答正文中偶现限额文案时误判。
 
 ### 交互原理
 

@@ -26,8 +26,11 @@ One-shot CLI wrapper for AI coding agents. Spawns Claude via `@anthropic-ai/clau
 ### CLI
 
 ```
-wrapper -p <prompt> [-t type [-c cmd]] [-t type [-c cmd]] ... [-d] [-s id] [-e "regex"] [-r 3] [-o 60]
+wrapper -p <prompt> [-t type [-c cmd]] [-t type [-c cmd]] ... [-d] [-s id] [-e "regex"] [-x "regex"] [-q] [-n] [-r 3] [-o 60]
 ```
+
+`-q, --quota` (default on): detect subscription quota exhaustion via built-in LimitMsg patterns; exit 206 when exhausted and no fallback.
+`-n, --no-quota`: disable quota detection; non-zero agent exit codes pass through unchanged.
 
 多 Agent 冗余调用:
 ```

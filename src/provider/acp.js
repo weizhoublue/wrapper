@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const acp = require("@agentclientprotocol/sdk");
 const log = require("../log");
+const { LimitMsg } = require("../limit-msg");
 
 const AUTH_PATTERNS = [
   /unauthorized/i,
@@ -140,6 +141,35 @@ function extractText(notifications, response) {
   return parts.join("");
 }
 
+function escapeRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Map ACP prompt result to a process exit code for wrapper / CI. */
+function inferAcpExitCode(provider, response, stdout, stderr, childStderr) {
+  const stopReason = response?.stopReason;
+  if (stopReason && stopReason !== "end_turn") {
+    return 1;
+  }
+
+  const out = (stdout || "").trim();
+  const errCombined = [stderr, childStderr].filter(Boolean).join("\n").trim();
+
+  if (/^Error:/m.test(out) || /^Error:/m.test(errCombined)) {
+    return 1;
+  }
+
+  const pattern = LimitMsg[provider];
+  if (pattern) {
+    const re = new RegExp(`^${escapeRegex(pattern)}`, "i");
+    const afterError = out.replace(/^Error:\s*/i, "");
+    if (afterError && re.test(afterError)) return 1;
+    if (errCombined && re.test(errCombined)) return 1;
+  }
+
+  return 0;
+}
+
 function extractThinking(notifications, response) {
   const parts = [];
 
@@ -180,6 +210,11 @@ async function createSession({ command, timeout, resume, provider = "copilot" })
 
   let childStderr = "";
   child.stderr.on("data", (chunk) => { childStderr += chunk.toString(); });
+
+  let childExitCode = null;
+  child.on("exit", (code) => {
+    if (code !== null) childExitCode = code;
+  });
 
   let childError = null;
   child.on("error", (err) => { childError = err; });
@@ -243,6 +278,7 @@ async function createSession({ command, timeout, resume, provider = "copilot" })
       sessionId,
       provider,
       childStderr: () => childStderr,
+      childExitCode: () => childExitCode,
       childError: () => childError,
       deadline,
       closed: false,
@@ -297,10 +333,25 @@ async function send(session, prompt) {
 
     const stdout = extractText(session.client.notifications, response);
     const stderr = extractThinking(session.client.notifications, response);
+    const childStderrText = session.childStderr();
 
-    log.debug("acp: stopReason=%s stdoutLen=%d", response.stopReason, stdout.length);
+    let exitCode = inferAcpExitCode(
+      session.provider, response, stdout, stderr, childStderrText,
+    );
+    const childCode = session.childExitCode?.();
+    if (childCode !== null && childCode !== 0) {
+      exitCode = childCode;
+    }
 
-    return { stdout, stderr: stderr || session.childStderr(), sessionId: session.sessionId, exitCode: 0 };
+    log.debug("acp: stopReason=%s exitCode=%d stdoutLen=%d",
+      response.stopReason, exitCode, stdout.length);
+
+    return {
+      stdout,
+      stderr: stderr || childStderrText,
+      sessionId: session.sessionId,
+      exitCode,
+    };
   } catch (err) {
     if (err.message === "timeout") {
       log.debug("acp: timeout");
@@ -350,6 +401,7 @@ module.exports = {
   run,
   extractText,
   extractThinking,
+  inferAcpExitCode,
   splitCommand,
   isAuthError,
   formatAuthHint,

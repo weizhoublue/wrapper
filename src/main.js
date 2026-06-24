@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const { parseArgs: nodeParseArgs } = require("node:util");
 const log = require("./log");
+const { LimitMsg, isQuotaExceeded, quotaReasonBrief } = require("./limit-msg");
 
 function splitCommand(cmd) {
   const parts = cmd.trim().split(/\s+/);
@@ -32,65 +33,73 @@ const HELP = `用法: wrapper -p <提示词> [选项]
 一次性 AI 编码代理 CLI 封装器。
 
 必填:
-  -p, --prompt <文本>     用户提示词
+    -p, --prompt <文本>     用户提示词
 
 选项:
-  -t, --type <名称>        代理类型: claude, codex, copilot, gemini, cursor, agy (默认: claude)
-                          可多次指定该选项，实现 fallback 调用 agent
-  -c, --command <命令>     执行命令 (须紧跟 -t 之后，默认根据 -t 决定)
-  -d, --debug             开启调试日志输出到 stderr
-  -e, --reg <模式>         匹配标准输出的正则表达式(大小写不敏感)，如果匹配失败，则会重试运行命令 
-  -x, --exclude <模式>     匹配标准输出的正则表达式(大小写不敏感)，如果匹配成功，则直接宣告当前 agent 失败，不再重试该 agent
-  -r, --retry <次数>       每个 agent 最大重试次数 (默认: 3)。如果多次指定 -t，则每个 agent 都会独立重试。
-  -s, --resume <id>       恢复之前的会话（不能同多次调用 -t 配合）
-  -o, --timeout <秒>      单次调用 agent 的超时时间，如果超时，则会尝试重新调用。单位秒 (默认: 0，不限时)
-  -h, --help              显示此帮助
-  -v, --version           显示版本号
+    -t, --type <名称>        代理类型: claude, codex, copilot, gemini, cursor, agy (默认: claude)
+                            可多次指定该选项，实现 fallback 调用 agent
+    -c, --command <命令>     执行命令 (须紧跟 -t 之后，默认根据 -t 决定)
+    -d, --debug             开启调试日志输出到 stderr
+    -e, --reg <模式>         匹配标准输出的正则表达式(大小写不敏感)
+                                如果匹配失败，则会重试运行命令 
+    -x, --exclude <模式>     匹配标准输出的正则表达式(大小写不敏感)
+                                如果匹配成功，则直接宣告当前 agent 失败，不再重试该 agent
+    -q, --quota             开启 agent 订阅额度耗尽检测（默认开启）
+                                  如果 agent 退出失败，且标准输出或标准错误输出中包含额度耗尽提示，
+                                  则直接宣告当前 agent 失败，不再重试该 agent
+    -n, --no-quota          关闭 agent 订阅额度耗尽检测
+    -r, --retry <次数>       每个 agent 最大重试次数 (默认: 3)
+                                如果多次指定 -t，每个 agent 有独立的重试次数
+                                如果不满足 -e 选项、-o 选项、 或者命令返回码非0、或者返回空的标准输出，则会重试运行
+    -s, --resume <id>       恢复之前的会话（不能同多次调用 -t 配合）
+    -o, --timeout <秒>      单次调用 agent 的超时时间，如果超时，则会尝试重新调用。单位秒 (默认: 0，不限时)
+    -h, --help              显示此帮助
+    -v, --version           显示版本号
 
 输出:
-  stdout  = 最后一个 agent 的标准输出
-  stderr  = 所有 agent 的标准输出和错误输出 + 最终成功的 agent 名字 (倒数第二行) + 会话 ID (最后一行)
-  退出码   = 最后一个 agent 的退出码
+    stdout  = 最后一个 agent 的标准输出
+    stderr  = 所有 agent 的标准输出和错误输出 + 最终成功的 agent 名字 (倒数第二行) + 会话 ID (最后一行)
+    退出码   = 最后一个 agent 的退出码
 
 例子:
-  wrapper -t claude -c "claude-free" -p "say hi in one word"
+    wrapper -t claude -c "claude-free" -p "say hi in one word"
 
-  wrapper -t claude -c "claude-free" -e "bingo|Bingo" -p "please say bingo in english"
+    wrapper -t claude -c "claude-free" -e "bingo|Bingo" -p "please say bingo in english"
 
-  wrapper -t claude -c "claude-free" -p "tomorow will rain" 2>/tmp/sid
-  session=$(tail -1 /tmp/sid)
-  wrapper -t claude -c "claude-free" -s \${session} -p "tell me all what I have said in this session"
+    wrapper -t claude -c "claude-free" -p "tomorow will rain" 2>/tmp/sid
+    session=$(tail -1 /tmp/sid)
+    wrapper -t claude -c "claude-free" -s \${session} -p "tell me all what I have said in this session"
 
 多 agent fallback 例子:
-  wrapper -t claude -c "claude-deepseek-flash" -t codex -t copilot -d -p  "say hi in one word" 2>/tmp/sid
-  agentName=$( sed '$d' /tmp/sid | sed -n '$p' )
-  session=$(tail -1 /tmp/sid)
+    wrapper -t claude -c "claude-deepseek-flash" -t codex -t copilot -d -p  "say hi in one word" 2>/tmp/sid
+    agentName=$( sed '$d' /tmp/sid | sed -n '$p' )
+    session=$(tail -1 /tmp/sid)
 
 codex:
-  wrapper -t codex -p "say hi in one word"
+    wrapper -t codex -p "say hi in one word"
 
-  wrapper -t codex  -p "tomorrow will rain" 2>/tmp/sid
-  session=$(tail -1 /tmp/sid)
-  wrapper -t codex -s \${session} -p  "tell me all what I have said in this session ?"
+    wrapper -t codex  -p "tomorrow will rain" 2>/tmp/sid
+    session=$(tail -1 /tmp/sid)
+    wrapper -t codex -s \${session} -p  "tell me all what I have said in this session ?"
 
 copilot:
-  wrapper -t copilot -p "say hi in one word"
+    wrapper -t copilot -p "say hi in one word"
 
 gemini:
-  wrapper -t gemini -p "say hi in one word"
+    wrapper -t gemini -p "say hi in one word"
 
 agy:
-  wrapper -t agy -p "say hi in one word"
+   wrapper -t agy -p "say hi in one word"
 
 cursor:
-  wrapper -t cursor -p "say hi in one word"
+    wrapper -t cursor -p "say hi in one word"
 
-  wrapper -t cursor -p "tomorrow will rain" 2>/tmp/sid
-  session=$(tail -1 /tmp/sid)
-  wrapper -t cursor -s \${session} -p "tell me all what I have said in this session"
+    wrapper -t cursor -p "tomorrow will rain" 2>/tmp/sid
+    session=$(tail -1 /tmp/sid)
+    wrapper -t cursor -s \${session} -p "tell me all what I have said in this session"
 
 debug:
-  wrapper -t claude -c "claude-free" -d -p "say hi in one word"
+    wrapper -t claude -c "claude-free" -d -p "say hi in one word"
 `;
 
 function parseArgs(argv) {
@@ -157,9 +166,28 @@ function parseArgs(argv) {
     }
   }
 
+  // Strip -q/--quota and -n/--no-quota before strict parse (symmetric boolean flags)
+  let quotaExplicit = null; // null → default true
+  const parsedRemainingArgs = [];
+  for (const arg of remainingArgs) {
+    if (arg === "--no-quota" || arg === "-n") {
+      if (quotaExplicit === true) {
+        throw new Error("conflicting options: -q/--quota and -n/--no-quota");
+      }
+      quotaExplicit = false;
+    } else if (arg === "--quota" || arg === "-q") {
+      if (quotaExplicit === false) {
+        throw new Error("conflicting options: -q/--quota and -n/--no-quota");
+      }
+      quotaExplicit = true;
+    } else {
+      parsedRemainingArgs.push(arg);
+    }
+  }
+
   // Phase 2: parse remaining options
   const { values } = nodeParseArgs({
-    args: remainingArgs,
+    args: parsedRemainingArgs,
     options: {
       prompt:    { type: "string", short: "p" },
       debug:     { type: "boolean", short: "d", default: false },
@@ -189,6 +217,7 @@ function parseArgs(argv) {
     debug: values.debug,
     reg: values.reg || "",
     exclude: values.exclude || "",
+    quota: quotaExplicit !== null ? quotaExplicit : true,
     retry: Number.isNaN(retry) ? 3 : retry,
     resume,
     timeout: Number.isNaN(timeout) ? 0 : timeout,
@@ -232,6 +261,7 @@ const EXIT_PROVIDER_ERROR = 202;
 const EXIT_TIMEOUT = 203;
 const EXIT_COMMAND_NOT_FOUND = 204;
 const EXIT_EXCLUDE_MATCH = 205;
+const EXIT_QUOTA_EXCEEDED = 206;
 
 function collapseBlankLines(text) {
   return text.replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "").replace(/\n+$/, "");
@@ -281,8 +311,8 @@ async function main() {
   for (const a of opts.agents) {
     log.debug("  agent type=%s command=%s commandName=%s", a.type, a.command, a.commandName);
   }
-  log.debug("prompt=%s timeout=%ds retry=%d reg=%s exclude=%s",
-    opts.prompt.slice(0, 100), opts.timeout, opts.retry, opts.reg || "(none)", opts.exclude || "(none)");
+  log.debug("prompt=%s timeout=%ds retry=%d reg=%s exclude=%s quota=%s",
+    opts.prompt.slice(0, 100), opts.timeout, opts.retry, opts.reg || "(none)", opts.exclude || "(none)", opts.quota);
 
   const providers = {
     claude: require("./provider/claude"),
@@ -375,6 +405,23 @@ async function main() {
         }
 
         if (lastResult.exitCode && lastResult.exitCode !== 0) {
+          if (opts.quota && isQuotaExceeded(agent.type, lastResult.stdout, lastResult.stderr)) {
+            const pattern = LimitMsg[agent.type];
+            log.error("agent %s attempt %d: quota exceeded — /%s/i matched",
+              agent.commandName, attempt + 1, pattern);
+            allResults.push({
+              commandName: agent.commandName,
+              stdout: lastResult.stdout || "",
+              stderr: lastResult.stderr || "",
+              sessionId: session.sessionId || lastResult.sessionId || "",
+              exitCode: lastResult.exitCode,
+              quotaExceeded: true,
+              wrapperError: quotaReasonBrief(pattern),
+            });
+            agentDone = true;
+            break;
+          }
+
           log.error("agent %s attempt %d: non-zero exit code %d", agent.commandName, attempt + 1, lastResult.exitCode);
           allResults.push({
             commandName: agent.commandName,
@@ -466,6 +513,9 @@ async function main() {
     if (lastAgentResult.timedOut) {
       process.exit(EXIT_TIMEOUT);
     }
+    if (lastAgentResult.quotaExceeded) {
+      process.exit(EXIT_QUOTA_EXCEEDED);
+    }
     if (lastAgentResult.exitCode && lastAgentResult.exitCode !== 0) {
       process.exit(lastAgentResult.exitCode);
     }
@@ -488,4 +538,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH };
+module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, LimitMsg, isQuotaExceeded, quotaReasonBrief, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH, EXIT_QUOTA_EXCEEDED };
