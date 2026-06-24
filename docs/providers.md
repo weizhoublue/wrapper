@@ -2,7 +2,7 @@
 
 ## 概览
 
-wrapper 通过统一的 `provider` 接口对接不同的 AI coding agent CLI 工具。已实现 claude、codex、copilot、gemini、cursor、agy。
+wrapper 通过统一的 `provider` 接口对接不同的 AI coding agent CLI 工具。已实现 claude、codex、copilot、gemini、cursor、agy、opencode。
 
 本实现中参考了楼下项目的这个 Agent 对接方案
 https://github.com/getpaseo/paseo
@@ -37,16 +37,20 @@ agent --yolo --approve-mcps acp
 
 # agy
 agy --dangerously-skip-permissions 
+
+# opencode
+opencode run --dangerously-skip-permissions --format json
 ```
 
 | Provider | 通信方式 | npm 依赖 | 自动注入 flag | Resume（`-s`） | 退出码来源 |
 |----------|---------|----------|-------------|-----------------|-----------|
 | Claude | Agent SDK | `claude-agent-sdk` | `--dangerously-skip-permissions`, `--permission-mode=bypassPermissions`（SDK option 同步设置） | `--resume <id>` CLI flag | `result.subtype === "success" ? 0 : 1` |
-| Codex | spawn 子进程 + NDJSON | 无 | `--json`, `--dangerously-bypass-approvals-and-sandbox`, `--skip-git-repo-check` | `exec resume <id>` 子命令 | 真实 OS 退出码 |
+| Codex | spawn 子进程 + 二进制调用 NDJSON | 无 | `--json`, `--dangerously-bypass-approvals-and-sandbox`, `--skip-git-repo-check` | `exec resume <id>` 子命令 | 真实 OS 退出码 |
 | Copilot | ACP | `agentclientprotocol/sdk` | `--acp`, `--allow-all-tools`, `--allow-all-paths`, `--allow-all-urls`, `--no-ask-user` | ACP `session/load` 协议方法 | `inferAcpExitCode()` + 子进程码 |
 | Gemini | ACP | `agentclientprotocol/sdk` | `--acp`, `--approval-mode=yolo`, `--skip-trust` | ACP `session/load` 协议方法 | 同上 |
 | Cursor | ACP | `agentclientprotocol/sdk` | `--yolo`, `--approve-mcps`, `acp` | ACP `session/load` 协议方法 | 同上 |
 | agy | spawn 子进程 + log 提取 | 无 | `--dangerously-skip-permissions`, `--log-file`, `--print` | `--conversation <id>` CLI flag | 真实 OS 退出码 |
+| opencode | spawn 子进程 + 二进制调用 NDJSON | 无 | `run`, `--format json`, `--dangerously-skip-permissions` | `--session <id>` CLI flag | 真实 OS 退出码 + JSON error 事件 |
 
 ## Claude
 
@@ -107,7 +111,7 @@ wrapper                            @anthropic-ai/claude-agent-sdk           clau
 - **文本提取**：`extractText` 优先取 assistant text blocks，无时用 `result.result` 兜底；`extractThinking` 取 thinking blocks
 - **命令拆分**：`splitCommand()` 拆为 command + args，有 args 时用 `spawnClaudeCodeProcess` 自行 spawn
 - **非交互模式**：`permissionMode: "bypassPermissions"` + `allowDangerouslySkipPermissions: true`（SDK option），外加 CLI flag `--dangerously-skip-permissions --permission-mode=bypassPermissions` 自动注入
-- **超时**：全局绝对 deadline，在 `createSession` 时设定
+- **超时**：main 每次 attempt 前重置 `session.deadline`（`-o` 秒）；send 轮询中检测 deadline
 
 ### 升级方式
 
@@ -181,7 +185,7 @@ Codex 通过 `codex exec resume <session_id>` 子命令实现 session resume。`
 - **文本提取**：`extractText` 取 `item.completed` 事件中 `item.type === "agent_message"` 的 text
 - **Thinking 提取**：`extractThinking` 取 `item.type === "reasoning"` 的 text
 - **Session ID**：`extractSessionId` 取 `thread.started` 事件的 `thread_id`
-- **超时**：全局绝对 deadline，超时发 SIGTERM → 2s 后 SIGKILL
+- **超时**：main 每次 attempt 前重置 deadline；超时发 SIGTERM → 2s 后 SIGKILL
 
 ### 升级方式
 
@@ -299,7 +303,7 @@ wrapper                     @agentclientprotocol/sdk         copilot --acp 进�
   - `readTextFile()` / `writeTextFile()`：允许 agent 读写文件系统
 - **Session ID**：resume 模式下 session ID 保持原值不变，new 模式下由 `session/new` 返回
 - **文本提取**：从 session_update notifications 和 prompt 响应中提取 text / thinking blocks
-- **超时**：全局绝对 deadline
+- **超时**：main 每次 attempt 前重置 deadline；send 时按剩余时间限制 prompt
 
 ### 升级方式
 
@@ -442,6 +446,61 @@ wrapper -t cursor -p "hello" -d
 wrapper -t cursor -p "hi" 2>/tmp/sid
 session=$(tail -1 /tmp/sid)
 wrapper -t cursor -s "$session" -p "what did I say?"
+```
+
+## OpenCode
+
+### CLI 工具
+
+[OpenCode](https://opencode.ai/)（CLI 命令：`opencode`）。
+
+### 为什么用 run + JSON
+
+OpenCode CLI 的 `opencode run` 支持非交互单次执行；加 `--format json` 后 stdout 按行输出 JSON 事件，每行含 `sessionID: "ses_..."`。与 Codex 类似，wrapper 每次 `send()` spawn 子进程、逐行解析 NDJSON，从 `type: "text"` 事件提取回答正文。模型与 `opencode run` 一致，由 OpenCode 自身配置决定，wrapper 不 hardcode 模型名。
+
+### SDK
+
+无 npm 依赖；直接 spawn `opencode` 子进程。
+
+### 交互原理
+
+每次 `send()` 执行 `opencode run ... <prompt>`。stdout 为 NDJSON 事件流；stderr 为 CLI 诊断输出。`extractText()` 拼接 `type: "text"` 的 `part.text`；`extractSessionId()` 读取事件中的 `sessionID`。
+
+### 必需 flag（自动注入）
+
+`ensureFlags()` 在 `createSession` 时确保：
+
+| 注入 | 作用 |
+|------|------|
+| `run` | 非交互单次执行（否则进入 TUI） |
+| `--format json` | NDJSON 事件流，含 sessionID |
+| `--dangerously-skip-permissions` | 跳过权限确认 |
+
+示例：`opencode` → `opencode run --format json --dangerously-skip-permissions`
+
+### Session Resume（`-s`）
+
+指定 `-s ses_...` 时，wrapper 注入 `--session <id>`（与 `opencode run --session` 一致）。Session ID 由 JSON 事件中的 `sessionID` 字段提供。
+
+### 认证
+
+假定用户已执行 `opencode auth login`（或 OpenCode 支持的等效登录）。未登录时 CLI 会报错，wrapper 透传 stderr 并以非零退出码结束。
+
+### 升级方式
+
+按 OpenCode CLI 官方文档更新 `opencode` 二进制；关注 `run --format json` 事件 schema 与 `--session` 行为变化。
+
+验证：
+
+```bash
+npm test
+node --test test/provider/opencode.test.js
+# live API smoke (opt-in):
+WRAPPER_OPENCODE_SMOKE=1 node --test test/provider/opencode.test.js
+wrapper -t opencode -p "hello" -d
+wrapper -t opencode -p "hi" 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+wrapper -t opencode -s "$session" -p "what did I say?"
 ```
 
 ## agy

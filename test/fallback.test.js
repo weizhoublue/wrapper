@@ -4,7 +4,7 @@ const path = require("path");
 const fs = require("fs");
 
 // Mock the providers
-const providers = ["claude", "codex", "copilot", "gemini", "cursor"];
+const providers = ["claude", "codex", "copilot", "gemini", "cursor", "opencode"];
 const mockProviders = {};
 
 for (const p of providers) {
@@ -254,9 +254,24 @@ describe("multi-agent fallback E2E", () => {
   });
 
   it("unknown provider type prints error and exits with provider error code", async () => {
-    await runMain(["-t", "opencode", "-p", "hello"]);
+    await runMain(["-t", "nonexistent", "-p", "hello"]);
     assert.strictEqual(exitCode, EXIT_PROVIDER_ERROR);
-    assert.ok(stderrData.includes("Error: unknown provider type: opencode"));
+    assert.ok(stderrData.includes("Error: unknown provider type: nonexistent"));
+  });
+
+  it("falls back to opencode when earlier agent fails", async () => {
+    mockProviders.claude.sendMock = () => ({
+      stdout: "", stderr: "fail", sessionId: "claude-session", exitCode: 1,
+    });
+    mockProviders.opencode.sendMock = () => ({
+      stdout: "from opencode", stderr: "", sessionId: "ses_mock", exitCode: 0,
+    });
+
+    await runMain(["-t", "claude", "-t", "opencode", "-p", "hello"]);
+
+    assert.strictEqual(exitCode, EXIT_OK);
+    assert.ok(stdoutData.includes("from opencode"));
+    assert.ok(stderrData.endsWith("opencode\nses_mock\n"));
   });
 
   it("case-insensitive regex matching", async () => {
@@ -280,6 +295,37 @@ describe("multi-agent fallback E2E", () => {
     await runMain(["-t", "claude", "-p", "hello", "-e", "match_nothing", "-r", "3"]);
 
     assert.strictEqual(attempts, 3);
+  });
+
+  it("retries on timeout up to -r limit", async () => {
+    let attempts = 0;
+    mockProviders.claude.sendMock = () => {
+      attempts++;
+      return { stdout: "", stderr: "", sessionId: "claude-session", exitCode: 1, timedOut: true };
+    };
+
+    await runMain(["-t", "claude", "-p", "hello", "-r", "3", "-o", "1"]);
+
+    assert.strictEqual(attempts, 3);
+    assert.strictEqual(exitCode, EXIT_TIMEOUT);
+    assert.ok(stderrData.includes("timed out after 1s"));
+  });
+
+  it("succeeds after timeout on earlier attempt", async () => {
+    let attempts = 0;
+    mockProviders.claude.sendMock = () => {
+      attempts++;
+      if (attempts < 2) {
+        return { stdout: "", stderr: "", sessionId: "claude-session", exitCode: 1, timedOut: true };
+      }
+      return { stdout: "ok", stderr: "", sessionId: "claude-session", exitCode: 0, timedOut: false };
+    };
+
+    await runMain(["-t", "claude", "-p", "hello", "-r", "3", "-o", "1"]);
+
+    assert.strictEqual(attempts, 2);
+    assert.strictEqual(exitCode, EXIT_OK);
+    assert.ok(stdoutData.includes("ok"));
   });
 
   it("logs retry needed and fallback as error level", async () => {

@@ -48,14 +48,14 @@ node src/main.js -h
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
 | `-p, --prompt` | 是 | - | 用户提示词 |
-| `-t, --type` | 否 | `claude` | provider 类型：claude / codex / copilot / gemini / cursor（可指定多次以实现冗余调用） |
+| `-t, --type` | 否 | `claude` | provider 类型：claude / codex / copilot / gemini / cursor / opencode（可指定多次以实现冗余调用） |
 | `-c, --command` | 否 | 跟 `-t` 联动 | 实际执行的命令（必须紧随在 `-t` 之后且每个 `-t` 仅限一个 `-c`） |
 | `-d, --debug` | 否 | 关 | 开启日志（所有级别输出到 stderr） |
 | `-e, --reg` | 否 | 空 | 正则匹配模式，不匹配则重试 |
 | `-x, --exclude` | 否 | 空 | 排除正则（仅匹配 stdout），匹配则立即宣告当前 agent 失败且不再重试 |
 | `-r, --retry` | 否 | 3 | 最大重试次数（适用于调用的每一个 Agent） |
 | `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 可用） |
-| `-o, --timeout` | 否 | 0（无超时） | 单次调用超时秒数（适用于调用的每一个 Agent） |
+| `-o, --timeout` | 否 | 3600（1 小时） | 单次 attempt 超时秒数；`0` 表示不限时 |
 | `-h, --help` | 否 | - | 输出中文帮助信息 |
 
 ## 输出
@@ -142,8 +142,11 @@ node src/main.js -p "hello" -d
 | `copilot` | `copilot --acp --allow-all-tools --allow-all-paths --allow-all-urls --no-ask-user` |
 | `gemini` | `gemini --acp --approval-mode=yolo --skip-trust` |
 | `cursor` | `agent --yolo --approve-mcps acp` |
+| `opencode` | `opencode run --dangerously-skip-permissions --format json` |
 
 `cursor` 使用 ACP 模式，适合改文件、跑 shell、用 MCP；需事先执行 `agent login` 或配置 `CURSOR_API_KEY`。详见 [providers.md](./providers.md#cursor)。
+
+`opencode` 使用 `run --format json` 模式（类似 codex）；需事先执行 `opencode auth login`。详见 [providers.md](./providers.md#opencode)。
 
 ### Cursor 快速示例
 
@@ -160,7 +163,17 @@ node src/main.js -t cursor -s "$session" -p "what did I say earlier?"
 node src/main.js -t cursor -c "cursor-agent" -p "refactor src/foo.js"
 ```
 
+### OpenCode 快速示例
+
+```bash
+node src/main.js -t opencode -p "say hi in one word"
+
+node src/main.js -t opencode -p "tomorrow will rain" 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+node src/main.js -t opencode -s "$session" -p "what did I say earlier?"
+```
+
 ## 依赖
 
 - Node.js >= 18
-- 对应 provider 的 CLI 已安装并认证（Claude：`claude`；Cursor：`agent` + `agent login`）
+- 对应 provider 的 CLI 已安装并认证（Claude：`claude`；Cursor：`agent` + `agent login`；OpenCode：`opencode` + `opencode auth login`）
