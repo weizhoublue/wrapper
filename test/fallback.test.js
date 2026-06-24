@@ -38,7 +38,7 @@ for (const p of providers) {
 
 // Require main after mocking providers
 const log = require("../src/log");
-const { main, EXIT_OK, EXIT_TIMEOUT, EXIT_PROVIDER_ERROR, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH, EXIT_REGEX_MISMATCH } = require("../src/main");
+const { main, EXIT_OK, EXIT_TIMEOUT, EXIT_PROVIDER_ERROR, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH, EXIT_REGEX_MISMATCH, EXIT_QUOTA_EXCEEDED } = require("../src/main");
 
 
 describe("multi-agent fallback E2E", () => {
@@ -343,6 +343,131 @@ describe("multi-agent fallback E2E", () => {
     assert.strictEqual(exitCode, 0);
     assert.strictEqual(copilotCalled, true);
     assert.ok(stdoutData.includes("all fine"));
+  });
+
+  it("exits 206 when codex quota pattern matches on non-zero exit", async () => {
+    mockProviders.codex.sendMock = () => ({
+      stdout: "",
+      stderr: "You've hit your usage limit",
+      sessionId: "codex-session",
+      exitCode: 1,
+    });
+
+    await runMain(["-t", "codex", "-p", "hello"]);
+
+    assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
+    assert.ok(stderrData.includes("[codex] error:"));
+    assert.ok(stderrData.includes("quota exceeded: /hit your usage limit/i matched"));
+  });
+
+  it("exits 206 when copilot quota pattern matches on non-zero exit", async () => {
+    mockProviders.copilot.sendMock = () => ({
+      stdout: "Error: You have exceeded your monthly quota (Request ID: abc)",
+      stderr: "",
+      sessionId: "copilot-session",
+      exitCode: 1,
+    });
+
+    await runMain(["-t", "copilot", "-p", "hello"]);
+
+    assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
+    assert.ok(stderrData.includes("[copilot] error:"));
+    assert.ok(stderrData.includes("quota exceeded: /You have exceeded your monthly quota/i matched"));
+  });
+
+  it("does not treat quota text as quota when exit code is 0", async () => {
+    mockProviders.copilot.sendMock = () => ({
+      stdout: "Here is a note: You have exceeded your monthly quota in the docs.",
+      stderr: "",
+      sessionId: "copilot-session",
+      exitCode: 0,
+    });
+
+    await runMain(["-t", "copilot", "-p", "hello"]);
+
+    assert.strictEqual(exitCode, 0);
+    assert.ok(!stderrData.includes("quota exceeded"));
+  });
+
+  it("exits 206 when gemini quota pattern matches on non-zero exit", async () => {
+    mockProviders.gemini.sendMock = () => ({
+      stdout: "",
+      stderr: "You have exhausted your capacity",
+      sessionId: "gemini-session",
+      exitCode: 1,
+    });
+
+    await runMain(["-t", "gemini", "-p", "hello"]);
+
+    assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
+    assert.ok(stderrData.includes("[gemini] error:"));
+    assert.ok(stderrData.includes("quota exceeded: /You have exhausted your capacity/i matched"));
+  });
+
+  it("falls back to next agent when first agent hits quota", async () => {
+    mockProviders.codex.sendMock = () => ({
+      stdout: "",
+      stderr: "You've hit your usage limit",
+      sessionId: "codex-session",
+      exitCode: 1,
+    });
+    let copilotCalled = false;
+    mockProviders.copilot.sendMock = () => {
+      copilotCalled = true;
+      return { stdout: "all fine", stderr: "", sessionId: "copilot-session", exitCode: 0 };
+    };
+
+    await runMain(["-t", "codex", "-t", "copilot", "-p", "hello"]);
+
+    assert.strictEqual(exitCode, 0);
+    assert.strictEqual(copilotCalled, true);
+    assert.ok(stderrData.includes("quota exceeded: /hit your usage limit/i matched"));
+    assert.ok(stdoutData.includes("all fine"));
+  });
+
+  it("passes through exit code when --no-quota", async () => {
+    mockProviders.codex.sendMock = () => ({
+      stdout: "",
+      stderr: "You've hit your usage limit",
+      sessionId: "codex-session",
+      exitCode: 1,
+    });
+
+    await runMain(["-t", "codex", "-p", "hello", "--no-quota"]);
+
+    assert.strictEqual(exitCode, 1);
+    assert.ok(stderrData.includes("non-zero exit code 1"));
+    assert.ok(!stderrData.includes("quota exceeded"));
+  });
+
+  it("passes through exit code when -n", async () => {
+    mockProviders.codex.sendMock = () => ({
+      stdout: "",
+      stderr: "You've hit your usage limit",
+      sessionId: "codex-session",
+      exitCode: 1,
+    });
+
+    await runMain(["-t", "codex", "-p", "hello", "-n"]);
+
+    assert.strictEqual(exitCode, 1);
+    assert.ok(stderrData.includes("non-zero exit code 1"));
+    assert.ok(!stderrData.includes("quota exceeded"));
+  });
+
+  it("does not treat non-matching non-zero exit as quota", async () => {
+    mockProviders.codex.sendMock = () => ({
+      stdout: "",
+      stderr: "some other error",
+      sessionId: "codex-session",
+      exitCode: 1,
+    });
+
+    await runMain(["-t", "codex", "-p", "hello"]);
+
+    assert.strictEqual(exitCode, 1);
+    assert.ok(stderrData.includes("non-zero exit code 1"));
+    assert.ok(!stderrData.includes("quota exceeded"));
   });
 
   it("prints version and exits", async () => {

@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_EXCLUDE_MATCH } = require("../src/main");
+const { parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, LimitMsg, isQuotaExceeded, quotaReasonBrief, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_EXCLUDE_MATCH, EXIT_QUOTA_EXCEEDED } = require("../src/main");
 
 describe("parseArgs", () => {
   it("parses required -p", () => {
@@ -83,6 +83,33 @@ describe("parseArgs", () => {
 
   it("throws on missing -p when args present", () => {
     assert.throws(() => parseArgs(["node", "main.js", "-t", "codex"]), /required option.*prompt/i);
+  });
+
+  it("defaults quota to true", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi"]);
+    assert.strictEqual(opts.quota, true);
+  });
+
+  it("parses --no-quota", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "--no-quota"]);
+    assert.strictEqual(opts.quota, false);
+  });
+
+  it("parses -n short form for --no-quota", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "-n"]);
+    assert.strictEqual(opts.quota, false);
+  });
+
+  it("parses -q to explicitly enable quota", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "-q"]);
+    assert.strictEqual(opts.quota, true);
+  });
+
+  it("errors on conflicting -q and -n", () => {
+    assert.throws(
+      () => parseArgs(["node", "main.js", "-p", "hi", "-q", "-n"]),
+      /conflicting options: -q\/\--quota and -n\/\--no-quota/,
+    );
   });
 });
 
@@ -204,6 +231,79 @@ describe("exit codes", () => {
   it("has distinct EXIT_EXCLUDE_MATCH exit code", () => {
     assert.strictEqual(EXIT_EXCLUDE_MATCH, 205);
   });
+
+  it("has distinct EXIT_QUOTA_EXCEEDED exit code", () => {
+    assert.strictEqual(EXIT_QUOTA_EXCEEDED, 206);
+  });
+});
+
+describe("LimitMsg", () => {
+  it("matches sample output for every agent with a non-empty pattern", () => {
+    const samples = {
+      codex: { stdout: "", stderr: "You've hit your usage limit" },
+      copilot: { stdout: "", stderr: "You have exceeded your monthly quota" },
+      gemini: { stdout: "", stderr: "You have exhausted your capacity" },
+    };
+    for (const [type, { stdout, stderr }] of Object.entries(samples)) {
+      assert.ok(LimitMsg[type], `${type} should have a LimitMsg pattern`);
+      assert.strictEqual(isQuotaExceeded(type, stdout, stderr), true, type);
+    }
+  });
+
+  it("has empty pattern for agents without known quota messages", () => {
+    for (const type of ["claude", "cursor", "agy"]) {
+      assert.strictEqual(LimitMsg[type], "", type);
+    }
+  });
+});
+
+describe("isQuotaExceeded", () => {
+  it("matches codex stderr pattern case-insensitively", () => {
+    assert.strictEqual(
+      isQuotaExceeded("codex", "", "You've hit your usage limit"),
+      true,
+    );
+  });
+
+  it("matches pattern in stdout", () => {
+    assert.strictEqual(
+      isQuotaExceeded("copilot", "You have exceeded your monthly quota", ""),
+      true,
+    );
+  });
+
+  it("returns false for agents with empty LimitMsg", () => {
+    for (const type of ["claude", "cursor", "agy"]) {
+      assert.strictEqual(
+        isQuotaExceeded(type, "", "hit your usage limit"),
+        false,
+        type,
+      );
+    }
+  });
+
+  it("matches gemini stderr pattern", () => {
+    assert.strictEqual(
+      isQuotaExceeded("gemini", "", "You have exhausted your capacity"),
+      true,
+    );
+  });
+
+  it("returns false when text does not match", () => {
+    assert.strictEqual(
+      isQuotaExceeded("codex", "", "some other error"),
+      false,
+    );
+  });
+});
+
+describe("quotaReasonBrief", () => {
+  it("formats quota exceeded message", () => {
+    assert.strictEqual(
+      quotaReasonBrief("hit your usage limit"),
+      "quota exceeded: /hit your usage limit/i matched",
+    );
+  });
 });
 
 describe("buildStderrOutput", () => {
@@ -279,6 +379,19 @@ describe("buildStderrOutput", () => {
     assert.ok(result.includes("[codex] stdout:\nHello."));
     assert.ok(result.includes("[codex] stderr:\nReading additional input from stdin..."));
     assert.ok(result.includes("[codex] error:\nexclude regex /hello/ matched"));
+  });
+
+  it("includes quota exceeded wrapper error in error section", () => {
+    const result = buildStderrOutput("codex", "sid-q", [
+      {
+        commandName: "codex",
+        stdout: "",
+        stderr: "You've hit your usage limit",
+        wrapperError: "quota exceeded: /hit your usage limit/i matched",
+      },
+    ]);
+    assert.ok(result.includes("[codex] stderr:\nYou've hit your usage limit"));
+    assert.ok(result.includes("[codex] error:\nquota exceeded: /hit your usage limit/i matched"));
   });
 });
 
