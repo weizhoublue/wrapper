@@ -492,3 +492,69 @@ node src/main.js -t copilot -t codex -s "some-id" -p "hello"
 echo $?
 
 ```
+
+## agy
+
+```shell
+
+npm install
+
+# 1. 基本调用
+node src/main.js -t agy \
+  -p "say hi in one word" -d 2>/tmp/a
+echo $?
+echo ""
+cat /tmp/a
+
+
+# 2. 自定义基础命令与模型选择
+node src/main.js -t agy -c 'agy --dangerously-skip-permissions --model="Gemini 3.5 Flash (High)"' -d \
+  -p "say hi in one word"
+echo $?
+
+# 4. 错误命令处理（期望退出码 204）
+node src/main.js -t agy -c "agy-bad" -d \
+  -p "what is your name"
+echo $?
+
+# 5. 正则输出匹配
+node src/main.js -t agy -d \
+  -e "bingo|Bingo" \
+  -p "please say bingo in english"
+echo $?
+
+# 6. 重试控制（相同会话内进行重试）
+node src/main.js -t agy -d -r 2 \
+  -e "no_bingo" \
+  -p "say hi in one word ? reply me in english"
+echo $?
+
+# 7. 超时控制（期望超时退出码 203）
+node src/main.js -t agy -d -o 1 \
+  -p "please reply me after 10 seconds"
+echo $?
+
+# 8. 会话恢复 (Resume)
+node src/main.js -t agy -p "tomorrow is monday" -d 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+cat /tmp/sid
+echo "session=${session}"
+echo "------------------"
+node src/main.js -t agy \
+  -s ${session} \
+  -d -p "tell me all what I have said in this session" 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+echo "session=${session}"
+
+# 9. 重试过程中的会话一致性
+node src/main.js -t agy -p "what is your name" -d 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+echo "session=${session}"
+echo "------------------"
+node src/main.js -t agy -d \
+  -s ${session} \
+  -e "no_bingo" \
+  -p "tell me all what I have said ? reply me in english"
+echo $?
+
+```
