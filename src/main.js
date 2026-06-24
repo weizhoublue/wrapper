@@ -20,7 +20,7 @@ function which(cmd) {
 
 
 const DEFAULTS = {
-  claude: "claude --dangerously-skmaiip-permissions --permission-mode=bypassPermissions",
+  claude: "claude --dangerously-skip-permissions --permission-mode=bypassPermissions",
   codex: "codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
   copilot: "copilot --acp --allow-all-tools --allow-all-paths --allow-all-urls --no-ask-user",
   gemini: "gemini --acp --approval-mode=yolo --skip-trust",
