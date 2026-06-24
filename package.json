@@ -1,6 +1,6 @@
 {
   "name": "wrapper",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "One-shot CLI wrapper for AI coding agents",
   "bin": {
     "wrapper": "./src/main.js"

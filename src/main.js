@@ -24,6 +24,7 @@ const DEFAULTS = {
   copilot: "copilot --acp --allow-all-tools --allow-all-paths --allow-all-urls --no-ask-user",
   gemini: "gemini --acp --approval-mode=yolo --skip-trust",
   cursor: "agent --yolo --approve-mcps acp",
+  agy: "agy --dangerously-skip-permissions ",
 };
 
 const HELP = `用法: wrapper -p <提示词> [选项]
@@ -34,7 +35,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
   -p, --prompt <文本>     用户提示词
 
 选项:
-  -t, --type <名称>        代理类型: claude, codex, copilot, gemini, cursor (默认: claude)
+  -t, --type <名称>        代理类型: claude, codex, copilot, gemini, cursor, agy (默认: claude)
                           可多次指定该选项，实现 fallback 调用 agent
   -c, --command <命令>     执行命令 (须紧跟 -t 之后，默认根据 -t 决定)
   -d, --debug             开启调试日志输出到 stderr
@@ -76,6 +77,9 @@ copilot:
 
 gemini:
   wrapper -t gemini -p "say hi in one word"
+
+agy:
+  wrapper -t agy -p "say hi in one word"
 
 cursor:
   wrapper -t cursor -p "say hi in one word"
@@ -264,6 +268,7 @@ async function main() {
     copilot: require("./provider/copilot"),
     gemini: require("./provider/gemini"),
     cursor: require("./provider/cursor"),
+    agy: require("./provider/agy"),
   };
 
   const regex = opts.reg ? new RegExp(opts.reg, "i") : null;

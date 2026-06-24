@@ -2,7 +2,10 @@
 
 ## 概览
 
-wrapper 通过统一的 `provider` 接口对接不同的 AI coding agent CLI 工具。已实现 claude、codex、copilot、gemini、cursor。
+wrapper 通过统一的 `provider` 接口对接不同的 AI coding agent CLI 工具。已实现 claude、codex、copilot、gemini、cursor、agy。
+
+本实现中参考了楼下项目的这个 Agent 对接方案
+https://github.com/getpaseo/paseo
 
 所有 provider 导出相同接口：
 
@@ -31,6 +34,9 @@ gemini --acp --approval-mode=yolo --skip-trust
 
 # cursor
 agent --yolo --approve-mcps acp
+
+# agy
+agy --dangerously-skip-permissions 
 ```
 
 | Provider | 通信方式 | npm 依赖 | 自动注入 flag | Resume（`-s`） |
@@ -40,6 +46,7 @@ agent --yolo --approve-mcps acp
 | Copilot | `@agentclientprotocol/sdk` (ACP) | `agentclientprotocol/sdk` | `--acp`, `--allow-all-tools`, `--allow-all-paths`, `--allow-all-urls`, `--no-ask-user` | ACP `session/load` 协议方法 |
 | Gemini | `@agentclientprotocol/sdk` (ACP) | `agentclientprotocol/sdk` | `--acp`, `--approval-mode=yolo`, `--skip-trust` | ACP `session/load` 协议方法 |
 | Cursor | `@agentclientprotocol/sdk` (ACP) | `agentclientprotocol/sdk` | `--yolo`, `--approve-mcps`, `acp` | ACP `session/load` 协议方法 |
+| agy | spawn `agy --print` + log 提取 | 无 | `--dangerously-skip-permissions`, `--log-file`, `--print` | `--conversation <id>` CLI flag |
 
 ## Claude
 
@@ -421,6 +428,72 @@ wrapper -t cursor -p "hello" -d
 wrapper -t cursor -p "hi" 2>/tmp/sid
 session=$(tail -1 /tmp/sid)
 wrapper -t cursor -s "$session" -p "what did I say?"
+```
+
+## agy
+
+### CLI 工具
+
+[Google Antigravity CLI](https://github.com/google/antigravity)（CLI 命令：`agy`）。
+
+### 为什么不用 ACP
+
+`agy` 暂不支持 ACP（Agent Client Protocol）。通过 `--print` 模式进行非交互式调用。
+
+### 交互原理
+
+使用 `agy` 命令行工具的 `--print` 模式，通过 **spawn + log 文件解析** 进行会话管理。无外部依赖，仅使用 Node.js 内置模块。
+
+由于 `agy` 会在主线程阻塞并从 stdin 读取输入，因此在 spawn 时必须将 stdin 重定向（`stdio: ["ignore", "pipe", "pipe"]`），避免进程挂起。
+
+```
+wrapper                                           agy 进程
+  |                                                  |
+  |-- spawn("agy", ["--print",                       |
+  |   "--dangerously-skip-permissions",              |
+  |   "--log-file", "<os.tmpdir()>/agy_session_xxx.log", |
+  |   prompt]) ------------------------------------> |
+  |   stdin: "ignore"                                |
+  |                                                  |
+  |   等待进程退出                                      |
+  |<-- 进程退出 -------------------------------------|
+  |                                                  |
+  |   读取 <os.tmpdir()>/agy_session_xxx.log 并匹配   |
+  |   "Print mode: conversation=<id>"                |
+  |   获取会话 ID，并异步删除临时日志文件              |
+```
+
+*注：`<os.tmpdir()>` 使用 Node.js 的 `os.tmpdir()` 获取，在 macOS 上通常指向 `/var/folders/.../T/`，在 Linux 上通常为 `/tmp/`。*
+
+### 必需 flag（自动注入）
+
+`ensureFlags()` 在 `createSession` 时确保以下 flag 存在，即使用户通过 `-c` 自定义命令：
+
+| flag | 作用 | 注入位置 |
+|------|------|---------|
+| `--dangerously-skip-permissions` | 自动批准所有工具调用权限，避免交互式确认挂起 | 默认命令或 args |
+| `--log-file <path>` | 重定向日志输出，用以提取会话 ID | 自动注入 |
+| `--print` | 开启单次输出非交互模式（若无 `--prompt` 等模式则注入） | 自动注入 |
+
+### Session Resume（`-s`）
+
+`agy` 通过 `--conversation <id>` 命令行参数恢复之前的会话。
+在 `send()` 执行时，若 `session.sessionId` 存在，则在 `spawn` 时动态拼装 `["--conversation", session.sessionId]`。同时，如果当前请求生成了新的会话 ID，会更新 `session.sessionId` 以保证后续重试的会话一致性。
+
+### 关键实现细节
+
+- **防止孤儿进程**：在 `send()` 入口处检查 `session.deadline`。若已超时，则直接返回超时结果，不执行 `spawn`。对于在执行中超时的进程，在触发超时后先执行 `child.kill("SIGTERM")`，2秒后执行 `child.kill("SIGKILL")` 终止孤儿进程。
+- **即时清理**：移除任何人为的 `setTimeout` 延迟，进程关闭后立即读取日志文件并将其删除。在 `child.on("error")` 事件中，也安全清理日志文件。
+
+### 验证：
+
+```bash
+npm test
+node --test test/provider/agy.test.js
+wrapper -t agy -p "hello" -d
+wrapper -t agy -p "hi" 2>/tmp/sid
+session=$(tail -1 /tmp/sid)
+wrapper -t agy -s "$session" -p "what did I say?"
 ```
 
 ## 添加新 Provider
