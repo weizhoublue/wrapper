@@ -248,7 +248,17 @@ async function createSession({ command, timeout, resume, provider = "copilot" })
       closed: false,
     };
   } catch (err) {
-    throw wrapAcpError(provider, err, childStderr);
+    const wrapped = wrapAcpError(provider, err, childStderr);
+    if (childStderr.trim()) {
+      try {
+        wrapped.message = `${wrapped.message}. Stderr:\n${childStderr.trim()}`;
+      } catch {
+        const newErr = new Error(`${wrapped.message}. Stderr:\n${childStderr.trim()}`);
+        newErr.code = wrapped.code;
+        throw newErr;
+      }
+    }
+    throw wrapped;
   }
 }
 

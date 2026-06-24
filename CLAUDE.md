@@ -26,7 +26,13 @@ One-shot CLI wrapper for AI coding agents. Spawns Claude via `@anthropic-ai/clau
 ### CLI
 
 ```
-wrapper -p <prompt> [-t claude] [-c "claude"] [-d] [-s] [-e "regex"] [-r 3] [-o 60]
+wrapper -p <prompt> [-t type [-c cmd]] [-t type [-c cmd]] ... [-d] [-s id] [-e "regex"] [-r 3] [-o 60]
+```
+
+多 Agent 冗余调用:
+```
+wrapper -t copilot -t codex -p "say hi in one word"
+wrapper -t claude -c "claude-deepseek" -t claude -c "claude-deepseek-flash" -p "say hi"
 ```
 
 ### Key design decisions

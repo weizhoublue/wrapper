@@ -34,27 +34,28 @@ wrapper (main.js)                 Claude Agent SDK               Claude CLI
 ## CLI 接口
 
 ```
-wrapper -p <prompt> [-t claude] [-c "claude"] [-d] [-s <id>] [-e "regex"] [-r 3] [-o 60]
+wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 ```
 
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
 | `-p, --prompt` | 是 | - | 用户提示词 |
-| `-t, --type` | 否 | `claude` | provider 类型：`claude` / `codex` / `copilot` / `gemini` / `cursor` |
-| `-c, --command` | 否 | 跟 `-t` 联动 | 实际执行的命令，支持带参数 |
+| `-t, --type` | 否 | `claude` | provider 类型：`claude` / `codex` / `copilot` / `gemini` / `cursor`（可多次指定以进行冗余备用调用） |
+| `-c, --command` | 否 | 跟前一个 `-t` 联动 | 实际执行的命令（必须紧跟在 `-t` 之后，且每个 `-t` 最多只能有一个 `-c`） |
 | `-d, --debug` | 否 | 关 | 开启日志 |
 | `-e, --reg` | 否 | 空 | 正则匹配模式 |
-| `-r, --retry` | 否 | 3 | 最大重试次数 |
-| `-s, --resume` | 否 | 空 | 恢复已有 session ID |
-| `-o, --timeout` | 否 | 0（无超时） | 超时秒数 |
+| `-r, --retry` | 否 | 3 | 最大重试次数（适用于调用的每一个 Agent） |
+| `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 时可用） |
+| `-o, --timeout` | 否 | 0（无超时） | 单次超时秒数（适用于调用的每一个 Agent） |
+| `-h, --help` | 否 | - | 显示中文帮助信息 |
 
 ## 输出规范
 
 | 输出 | 成功 | 失败 |
 |------|------|------|
-| stdout | 回答文本（去首尾空行、压缩连续空行） | 最后一次输出 |
-| stderr | 思考过程 + session ID（最后一行） | 思考过程 + session ID |
-| exit code | 0 | 200-203 |
+| stdout | 最终成功（或最后一个失败的）Agent 的回答文本（去首尾空行、压缩连续空行） | 最后一个失败 Agent 的回答文本 |
+| stderr | 包含所有尝试过的 Agent 的标准输出/标准错误输出（以标签隔开），最后倒数第二行为成功（或最后一个失败的）Agent 的命令名，最后一行为最终会话 ID | 所有已尝试 Agent 的输出与错误汇总，倒数第二行为最后一个 Agent 的命令名，最后一行为会话 ID |
+| exit code | 最终成功 Agent 的退出码（通常为 0） | 最后一个 Agent 的退出码或重试耗尽退出码（200-204） |
 
 ### 退出码
 
@@ -134,6 +135,18 @@ Copilot / Gemini 不使用 `--resume` CLI flag（该 flag 仅在交互模式下�
 ### 退出码
 
 重试耗尽后根据原因返回不同退出码。
+
+## 冗余 Fallback 机制
+
+### 机制说明
+支持多次指定 `-t` 及紧跟其后的 `-c`。例如：`wrapper -t copilot -t codex -p "hello"`。
+1. **顺序尝试**：从第一个指定的 Agent 开始，依次尝试。
+2. **提前终止**：一旦某一个 Agent 满足成功条件（非空且匹配正则），则直接退出，后续的 Agent 将不被调用。
+3. **依次 fallback**：若当前 Agent 失败（包括会话创建失败、发送失败、超时、非零退出码或重试耗尽），则记录当前 Agent 的输出/错误后，落入下一个 Agent 重新尝试整个重试循环。
+4. **互斥约束**：
+   - 每一个 `-c` 必须紧跟在 `-t` 之后，否则抛错。
+   - 同一个 `-t` 只能指定一个 `-c`，不可重复。
+   - `-s, --resume` 仅支持单 Agent 使用，多 Agent 时指定 `-s` 会抛错。
 
 ## 日志
 
