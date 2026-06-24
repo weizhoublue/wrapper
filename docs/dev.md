@@ -18,6 +18,7 @@ make build           # 构建 4 平台二进制到 dist/
 npm test                                    # 所有测试
 node --test test/log.test.js                # 日志模块
 node --test test/main.test.js               # 参数解析 + 流程
+node --test test/fallback.test.js           # 多 agent fallback + exclude 集成测试
 node --test test/provider/claude.test.js    # Claude provider
 node --test test/provider/gemini.test.js    # Gemini provider 集成测试
 node --test test/smoke.test.js              # 集成测试（需 claude CLI）
@@ -39,6 +40,7 @@ src/
 test/
   log.test.js
   main.test.js
+  fallback.test.js
   provider/
     claude.test.js
     gemini.test.js
@@ -92,6 +94,22 @@ provider.run({ command, prompt, timeout }) → { stdout, stderr, sessionId, exit
 
 `retryReason(stdout, regex)` 生成详细原因日志。重试时 `-d` 开启会同时打印上次尝试的完整 stdout/stderr。
 
+### 失败原因输出（`[agent] error:`）
+
+结构化 stderr 固定顺序：
+
+1. `[agent] stdout:` — agent 标准输出（无内容仍保留标签）
+2. `[agent] stderr:` — agent 标准错误（不含 wrapper 提示）
+3. `[agent] error:` — wrapper 判定原因（仅失败时，无需 `-d`）
+
+`-d` 仅额外输出 `[wrapper][level][timestamp]` 调试日志。
+
+### 排除匹配（`-x`）
+
+每次 `send()` 返回后，在 `canRetry()` 之前检查 stdout 是否命中 `-x` 排除正则（大小写不敏感，**仅匹配 stdout**）。命中则立即停止重试；若有 fallback agent 则继续下一个，否则退出码 **205**。
+
+与 `-e` 同时指定时，exclude 检查优先于成功/重试判定。
+
 ### 空行处理
 
 `collapseBlankLines(text)`：
@@ -108,6 +126,7 @@ provider.run({ command, prompt, timeout }) → { stdout, stderr, sessionId, exit
 | 202 | provider 异常 |
 | 203 | 超时 |
 | 204 | 命令未找到 |
+| 205 | 排除正则匹配（stdout 命中 `-x` 模式） |
 
 退出码从 200 起步，避免和 claude 命令自身退出码（0/1/2）冲突。
 

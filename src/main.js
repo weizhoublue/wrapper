@@ -39,7 +39,8 @@ const HELP = `用法: wrapper -p <提示词> [选项]
                           可多次指定该选项，实现 fallback 调用 agent
   -c, --command <命令>     执行命令 (须紧跟 -t 之后，默认根据 -t 决定)
   -d, --debug             开启调试日志输出到 stderr
-  -e, --reg <模式>         用于匹配输出的正则表达式(大小写不敏感)，如果不匹配则会重试运行命令 
+  -e, --reg <模式>         匹配标准输出的正则表达式(大小写不敏感)，如果匹配失败，则会重试运行命令 
+  -x, --exclude <模式>     匹配标准输出的正则表达式(大小写不敏感)，如果匹配成功，则直接宣告当前 agent 失败，不再重试该 agent
   -r, --retry <次数>       每个 agent 最大重试次数 (默认: 3)。如果多次指定 -t，则每个 agent 都会独立重试。
   -s, --resume <id>       恢复之前的会话（不能同多次调用 -t 配合）
   -o, --timeout <秒>      单次调用 agent 的超时时间，如果超时，则会尝试重新调用。单位秒 (默认: 0，不限时)
@@ -163,6 +164,7 @@ function parseArgs(argv) {
       prompt:    { type: "string", short: "p" },
       debug:     { type: "boolean", short: "d", default: false },
       reg:       { type: "string", short: "e" },
+      exclude:   { type: "string", short: "x" },
       retry:     { type: "string", short: "r", default: "3" },
       resume:    { type: "string", short: "s" },
       timeout:   { type: "string", short: "o", default: "0" },
@@ -186,6 +188,7 @@ function parseArgs(argv) {
     prompt: values.prompt,
     debug: values.debug,
     reg: values.reg || "",
+    exclude: values.exclude || "",
     retry: Number.isNaN(retry) ? 3 : retry,
     resume,
     timeout: Number.isNaN(timeout) ? 0 : timeout,
@@ -207,13 +210,13 @@ function buildStderrOutput(agentCommandName, sessionId, agentResults) {
   const parts = [];
 
   for (const r of agentResults) {
-    if (r.stderr) {
-      parts.push(`[${r.commandName}] stderr:`);
-      parts.push(r.stderr);
-    }
-    if (r.stdout) {
-      parts.push(`[${r.commandName}] stdout:`);
-      parts.push(r.stdout);
+    parts.push(`[${r.commandName}] stdout:`);
+    if (r.stdout) parts.push(r.stdout);
+    parts.push(`[${r.commandName}] stderr:`);
+    if (r.stderr) parts.push(r.stderr);
+    if (r.wrapperError) {
+      parts.push(`[${r.commandName}] error:`);
+      parts.push(r.wrapperError);
     }
   }
 
@@ -228,6 +231,7 @@ const EXIT_EMPTY_OUTPUT = 201;
 const EXIT_PROVIDER_ERROR = 202;
 const EXIT_TIMEOUT = 203;
 const EXIT_COMMAND_NOT_FOUND = 204;
+const EXIT_EXCLUDE_MATCH = 205;
 
 function collapseBlankLines(text) {
   return text.replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "").replace(/\n+$/, "");
@@ -237,6 +241,24 @@ function retryReason(stdout, regex) {
   if (isOutputEmpty(stdout)) return "empty output";
   if (regex) return `regex /${regex.source}/ not matched, stdout: ${stdout.slice(0, 80).replace(/\n/g, "\\n")}`;
   return "unknown";
+}
+
+function retryReasonBrief(stdout, regex) {
+  if (isOutputEmpty(stdout)) return "empty output";
+  if (regex) return `regex /${regex.source}/ not matched`;
+  return "unknown";
+}
+
+function excludeReason(stdout, regex) {
+  return `exclude regex /${regex.source}/ matched, stdout: ${stdout.slice(0, 80).replace(/\n/g, "\\n")}`;
+}
+
+function excludeReasonBrief(regex) {
+  return `exclude regex /${regex.source}/ matched`;
+}
+
+function exhaustedReason(stdout, regex, maxAttempts) {
+  return `all ${maxAttempts} attempts exhausted: ${retryReasonBrief(stdout, regex)}`;
 }
 
 async function main() {
@@ -259,8 +281,8 @@ async function main() {
   for (const a of opts.agents) {
     log.debug("  agent type=%s command=%s commandName=%s", a.type, a.command, a.commandName);
   }
-  log.debug("prompt=%s timeout=%ds retry=%d reg=%s",
-    opts.prompt.slice(0, 100), opts.timeout, opts.retry, opts.reg || "(none)");
+  log.debug("prompt=%s timeout=%ds retry=%d reg=%s exclude=%s",
+    opts.prompt.slice(0, 100), opts.timeout, opts.retry, opts.reg || "(none)", opts.exclude || "(none)");
 
   const providers = {
     claude: require("./provider/claude"),
@@ -272,6 +294,7 @@ async function main() {
   };
 
   const regex = opts.reg ? new RegExp(opts.reg, "i") : null;
+  const excludeRegex = opts.exclude ? new RegExp(opts.exclude, "i") : null;
   const allResults = []; // { commandName, stdout, stderr, sessionId, ... }
 
   for (let agentIdx = 0; agentIdx < opts.agents.length; agentIdx++) {
@@ -296,10 +319,11 @@ async function main() {
       allResults.push({
         commandName: agent.commandName,
         stdout: "",
-        stderr: err.message,
+        stderr: "",
         sessionId: "",
         sessionCreationFailed: true,
         commandNotFound: err.message.startsWith("command not found"),
+        wrapperError: `session creation failed: ${err.message}`,
       });
       if (agentIdx < opts.agents.length - 1) {
         log.error("agent %s failed, falling back to next agent", agent.commandName);
@@ -327,9 +351,10 @@ async function main() {
           allResults.push({
             commandName: agent.commandName,
             stdout: lastResult?.stdout || "",
-            stderr: err.message,
+            stderr: lastResult?.stderr || "",
             sessionId: session?.sessionId || "",
             sendFailed: true,
+            wrapperError: `provider send failed: ${err.message}`,
           });
           agentDone = true;
           break; // fallback to next agent
@@ -343,6 +368,7 @@ async function main() {
             stderr: lastResult.stderr || "",
             sessionId: session.sessionId || lastResult.sessionId || "",
             timedOut: true,
+            wrapperError: `timed out after ${opts.timeout}s`,
           });
           agentDone = true;
           break; // fallback to next agent
@@ -356,9 +382,25 @@ async function main() {
             stderr: lastResult.stderr || "",
             sessionId: session.sessionId || lastResult.sessionId || "",
             exitCode: lastResult.exitCode,
+            wrapperError: `non-zero exit code ${lastResult.exitCode}`,
           });
           agentDone = true;
           break; // fallback to next agent
+        }
+
+        if (excludeRegex && excludeRegex.test(lastResult.stdout)) {
+          const reason = excludeReason(lastResult.stdout, excludeRegex);
+          log.error("agent %s attempt %d: excluded pattern matched — %s", agent.commandName, attempt + 1, reason);
+          allResults.push({
+            commandName: agent.commandName,
+            stdout: lastResult.stdout || "",
+            stderr: lastResult.stderr || "",
+            sessionId: session.sessionId || lastResult.sessionId || "",
+            excludeMatched: true,
+            wrapperError: excludeReasonBrief(excludeRegex),
+          });
+          agentDone = true;
+          break; // break retry loop, fallback or exit
         }
 
         if (!canRetry(lastResult.stdout, regex)) {
@@ -387,6 +429,7 @@ async function main() {
           stderr: lastResult?.stderr || "",
           sessionId: session.sessionId || lastResult?.sessionId || "",
           exhausted: true,
+          wrapperError: exhaustedReason(lastResult?.stdout || "", regex, maxAttempts),
         });
       }
     } finally {
@@ -426,6 +469,9 @@ async function main() {
     if (lastAgentResult.exitCode && lastAgentResult.exitCode !== 0) {
       process.exit(lastAgentResult.exitCode);
     }
+    if (lastAgentResult.excludeMatched) {
+      process.exit(EXIT_EXCLUDE_MATCH);
+    }
     if (lastAgentResult.exhausted) {
       const exitCode = isOutputEmpty(lastAgentResult.stdout) ? EXIT_EMPTY_OUTPUT
         : (regex ? EXIT_REGEX_MISMATCH : EXIT_OK);
@@ -442,4 +488,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND };
+module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH };
