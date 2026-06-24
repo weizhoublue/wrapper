@@ -84,7 +84,7 @@ provider.run({ command, prompt, timeout }) → { stdout, stderr, sessionId, exit
 
 ### 超时机制
 
-全局绝对超时：deadline 在 `createSession` 时一次性设定 (`Date.now() + timeout*1000`)，不随新事件重置，不因重试延长。超时到达 → 立即返回，不重试，退出码 203。
+`-o` 表示单次 attempt 的超时秒数（默认 3600，即 1 小时）。每次 attempt 开始前重置 `session.deadline`；超时后纳入 `-r` 重试，全部 attempt 超时则退出码 203。`-o 0` 表示不限时。
 
 ### 重试逻辑
 

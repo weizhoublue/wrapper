@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, LimitMsg, isQuotaExceeded, quotaReasonBrief, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_EXCLUDE_MATCH, EXIT_QUOTA_EXCEEDED } = require("../src/main");
+const { parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, LimitMsg, isQuotaExceeded, quotaReasonBrief, DEFAULT_TIMEOUT, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_EXCLUDE_MATCH, EXIT_QUOTA_EXCEEDED } = require("../src/main");
 
 describe("parseArgs", () => {
   it("parses required -p", () => {
@@ -15,6 +15,17 @@ describe("parseArgs", () => {
     assert.strictEqual(opts.agents[0].commandName, "claude");
   });
 
+  it("defaults timeout to 1 hour", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi"]);
+    assert.strictEqual(opts.timeout, DEFAULT_TIMEOUT);
+    assert.strictEqual(DEFAULT_TIMEOUT, 3600);
+  });
+
+  it("allows -o 0 for no timeout", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "-o", "0"]);
+    assert.strictEqual(opts.timeout, 0);
+  });
+
   it("resolves default command for claude type", () => {
     const opts = parseArgs(["node", "main.js", "-p", "hi"]);
     assert.strictEqual(opts.agents[0].command, "claude --dangerously-skip-permissions --permission-mode=bypassPermissions");
@@ -24,6 +35,12 @@ describe("parseArgs", () => {
     const opts = parseArgs(["node", "main.js", "-p", "hi", "-t", "cursor"]);
     assert.strictEqual(opts.agents[0].command, "agent --yolo --approve-mcps acp");
     assert.strictEqual(opts.agents[0].commandName, "cursor");
+  });
+
+  it("resolves default command for opencode type", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "-t", "opencode"]);
+    assert.strictEqual(opts.agents[0].command, "opencode run --dangerously-skip-permissions --format json");
+    assert.strictEqual(opts.agents[0].commandName, "opencode");
   });
 
   it("respects explicit -c", () => {

@@ -8,7 +8,7 @@ const LimitMsg = {
   gemini: "You have exhausted your capacity",
   // 超额时，它的返回码 0，没有消息，无法检测
   agy: "",
-  // 超额时，它就卡住不退出
+  // 超额时，它就卡住不退出，无法检测
   opencode: "",
 };
 

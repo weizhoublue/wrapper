@@ -19,6 +19,8 @@ function which(cmd) {
 }
 
 
+const DEFAULT_TIMEOUT = 3600; // 1 hour per attempt
+
 const DEFAULTS = {
   claude: "claude --dangerously-skip-permissions --permission-mode=bypassPermissions",
   codex: "codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
@@ -26,6 +28,7 @@ const DEFAULTS = {
   gemini: "gemini --acp --approval-mode=yolo --skip-trust",
   cursor: "agent --yolo --approve-mcps acp",
   agy: "agy --dangerously-skip-permissions ",
+  opencode: "opencode run --dangerously-skip-permissions --format json",
 };
 
 const HELP = `用法: wrapper -p <提示词> [选项]
@@ -36,7 +39,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
     -p, --prompt <文本>     用户提示词
 
 选项:
-    -t, --type <名称>        代理类型: claude, codex, copilot, gemini, cursor, agy (默认: claude)
+    -t, --type <名称>        代理类型: claude, codex, copilot, gemini, cursor, agy, opencode (默认: claude)
                             可多次指定该选项，实现 fallback 调用 agent
     -c, --command <命令>     执行命令 (须紧跟 -t 之后，默认根据 -t 决定)
     -d, --debug             开启调试日志输出到 stderr
@@ -48,11 +51,15 @@ const HELP = `用法: wrapper -p <提示词> [选项]
                                   如果 agent 退出失败，且标准输出或标准错误输出中包含额度耗尽提示，
                                   则直接宣告当前 agent 失败，不再重试该 agent
     -n, --no-quota          关闭 agent 订阅额度耗尽检测
+                                  当前支持 codex copilot gemini
+                                  还不支持 claude cursor （不知道长什么样） 
+                                  这些无法检测  agy（无任何提示）   opencode（卡住不退出）
     -r, --retry <次数>       每个 agent 最大重试次数 (默认: 3)
                                 如果多次指定 -t，每个 agent 有独立的重试次数
                                 如果不满足 -e 选项、-o 选项、 或者命令返回码非0、或者返回空的标准输出，则会重试运行
+                                -x 选项匹配时，直接不重试
     -s, --resume <id>       恢复之前的会话（不能同多次调用 -t 配合）
-    -o, --timeout <秒>      单次调用 agent 的超时时间，如果超时，则会尝试重新调用。单位秒 (默认: 0，不限时)
+    -o, --timeout <秒>      单次 attempt 超时秒数，超时后纳入 -r 重试 (默认: 3600，即 1 小时；0 表示不限时)
     -h, --help              显示此帮助
     -v, --version           显示版本号
 
@@ -97,6 +104,13 @@ cursor:
     wrapper -t cursor -p "tomorrow will rain" 2>/tmp/sid
     session=$(tail -1 /tmp/sid)
     wrapper -t cursor -s \${session} -p "tell me all what I have said in this session"
+
+opencode:
+    wrapper -t opencode -p "say hi in one word"
+
+    wrapper -t opencode -p "tomorrow will rain" 2>/tmp/sid
+    session=$(tail -1 /tmp/sid)
+    wrapper -t opencode -s \${session} -p "tell me all what I have said in this session"
 
 debug:
     wrapper -t claude -c "claude-free" -d -p "say hi in one word"
@@ -195,7 +209,7 @@ function parseArgs(argv) {
       exclude:   { type: "string", short: "x" },
       retry:     { type: "string", short: "r", default: "3" },
       resume:    { type: "string", short: "s" },
-      timeout:   { type: "string", short: "o", default: "0" },
+      timeout:   { type: "string", short: "o", default: String(DEFAULT_TIMEOUT) },
       help:      { type: "boolean", short: "h", default: false },
     },
   });
@@ -220,7 +234,7 @@ function parseArgs(argv) {
     quota: quotaExplicit !== null ? quotaExplicit : true,
     retry: Number.isNaN(retry) ? 3 : retry,
     resume,
-    timeout: Number.isNaN(timeout) ? 0 : timeout,
+    timeout: Number.isNaN(timeout) ? DEFAULT_TIMEOUT : timeout,
     agents,
   };
 }
@@ -279,6 +293,10 @@ function retryReasonBrief(stdout, regex) {
   return "unknown";
 }
 
+function timeoutReasonBrief(seconds) {
+  return `timed out after ${seconds}s`;
+}
+
 function excludeReason(stdout, regex) {
   return `exclude regex /${regex.source}/ matched, stdout: ${stdout.slice(0, 80).replace(/\n/g, "\\n")}`;
 }
@@ -321,6 +339,7 @@ async function main() {
     gemini: require("./provider/gemini"),
     cursor: require("./provider/cursor"),
     agy: require("./provider/agy"),
+    opencode: require("./provider/opencode"),
   };
 
   const regex = opts.reg ? new RegExp(opts.reg, "i") : null;
@@ -374,6 +393,10 @@ async function main() {
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         log.info("agent %s attempt %d/%d session=%s", agent.commandName, attempt + 1, maxAttempts, session.sessionId || "(pending)");
 
+        if (opts.timeout > 0 && session.deadline !== undefined) {
+          session.deadline = Date.now() + opts.timeout * 1000;
+        }
+
         try {
           lastResult = await provider.send(session, opts.prompt);
         } catch (err) {
@@ -392,16 +415,20 @@ async function main() {
 
         if (lastResult.timedOut) {
           log.error("agent %s attempt %d: timed out after %ds", agent.commandName, attempt + 1, opts.timeout);
-          allResults.push({
-            commandName: agent.commandName,
-            stdout: lastResult.stdout || "",
-            stderr: lastResult.stderr || "",
-            sessionId: session.sessionId || lastResult.sessionId || "",
-            timedOut: true,
-            wrapperError: `timed out after ${opts.timeout}s`,
-          });
-          agentDone = true;
-          break; // fallback to next agent
+          log.debug("attempt %d stdout:\n%s", attempt + 1, lastResult.stdout || "(empty)");
+          log.debug("attempt %d stderr:\n%s", attempt + 1, lastResult.stderr || "(empty)");
+          if (attempt + 1 >= maxAttempts) {
+            allResults.push({
+              commandName: agent.commandName,
+              stdout: lastResult.stdout || "",
+              stderr: lastResult.stderr || "",
+              sessionId: session.sessionId || lastResult.sessionId || "",
+              timedOut: true,
+              wrapperError: timeoutReasonBrief(opts.timeout),
+            });
+            agentDone = true;
+          }
+          continue;
         }
 
         if (lastResult.exitCode && lastResult.exitCode !== 0) {
@@ -538,4 +565,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, LimitMsg, isQuotaExceeded, quotaReasonBrief, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH, EXIT_QUOTA_EXCEEDED };
+module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, timeoutReasonBrief, LimitMsg, isQuotaExceeded, quotaReasonBrief, DEFAULT_TIMEOUT, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH, EXIT_QUOTA_EXCEEDED };

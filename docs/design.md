@@ -40,7 +40,7 @@ wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
 | `-p, --prompt` | 是 | - | 用户提示词 |
-| `-t, --type` | 否 | `claude` | provider 类型：`claude` / `codex` / `copilot` / `gemini` / `cursor`（可多次指定以进行冗余备用调用） |
+| `-t, --type` | 否 | `claude` | provider 类型：`claude` / `codex` / `copilot` / `gemini` / `cursor` / `opencode`（可多次指定以进行冗余备用调用） |
 | `-c, --command` | 否 | 跟前一个 `-t` 联动 | 实际执行的命令（必须紧跟在 `-t` 之后，且每个 `-t` 最多只能有一个 `-c`） |
 | `-d, --debug` | 否 | 关 | 开启日志 |
 | `-e, --reg` | 否 | 空 | 正则匹配模式，不匹配则重试 |
@@ -49,7 +49,7 @@ wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 | `-n, --no-quota` | 否 | — | 关闭 agent 订阅额度耗尽检测 |
 | `-r, --retry` | 否 | 3 | 最大重试次数（适用于调用的每一个 Agent） |
 | `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 时可用） |
-| `-o, --timeout` | 否 | 0（无超时） | 单次超时秒数（适用于调用的每一个 Agent） |
+| `-o, --timeout` | 否 | 3600（1 小时） | 单次 attempt 超时秒数；`0` 表示不限时 |
 | `-h, --help` | 否 | - | 显示中文帮助信息 |
 
 ## 输出规范
@@ -104,8 +104,9 @@ run({ command, prompt, timeout }) → { stdout, stderr, sessionId, exitCode }  /
 | Copilot | ACP `session/load` 协议方法 | `connection.loadSession({ sessionId, cwd })` |
 | Gemini | ACP `session/load` 协议方法 | `connection.loadSession({ sessionId, cwd })` |
 | Cursor | ACP `session/load` 协议方法 | `agent --yolo --approve-mcps acp` + `connection.loadSession({ sessionId, cwd })` |
+| OpenCode | `--session <id>` CLI flag | `opencode run --session <id> --format json ...` |
 
-Copilot / Gemini 不使用 `--resume` CLI flag（该 flag 仅在交互模式下有效，与 `--acp` 不兼容）。在 ACP 模式下通过 `session/load` 协议方法恢复 session。
+Copilot / Gemini / Cursor 不使用 `--resume` CLI flag（该 flag 仅在交互模式下有效，与 ACP 不兼容）。在 ACP 模式下通过 `session/load` 协议方法恢复 session。OpenCode 使用 `run --session`，与 Codex 的 `exec resume` 类似但 flag 名不同。
 
 ### 消息队列 (AsyncMessageInput)
 
@@ -127,7 +128,7 @@ Copilot / Gemini 不使用 `--resume` CLI flag（该 flag 仅在交互模式下�
 
 1. 输出为空或纯空白
 2. 指定了 `-e` 且 stdout 不匹配该正则
-3. 超时不触发重试（直接退出 203）
+3. 单次 attempt 超时（`-o` > 0 且 `timedOut`），在 `-r` 次数内重试；全部 attempt 超时后退出 203
 
 ### 排除匹配（`-x`）
 
@@ -143,7 +144,7 @@ Copilot / Gemini 不使用 `--resume` CLI flag（该 flag 仅在交互模式下�
 
 ### 超时
 
-全局绝对超时：deadline 在 session 创建时一次性设定，不随事件流重置，不因重试延长。`-o 0` 表示无超时（deadline = Infinity）。
+每次 attempt 开始前重置 deadline（`Date.now() + timeout*1000`），即 `-o` 表示单次 attempt 的超时秒数，重试时重新计时。`-o 0` 表示无超时（deadline = Infinity）。
 
 ### 退出码
 
@@ -180,6 +181,7 @@ src/
     copilot.js                  — Copilot ACP 适配
     gemini.js                   — Gemini ACP 适配（复用 acp.js）
     cursor.js                   — Cursor ACP 适配（复用 acp.js）
+    opencode.js                 — OpenCode run + JSON 适配
 scripts/
   patch-bundle.js               — 修复 esbuild 打包后的 import_meta.url
 Makefile                        — test / build / clean targets
@@ -192,3 +194,4 @@ dist/                           — 构建产物（二进制 + bundle）
 - Copilot provider：已实现，使用 `@agentclientprotocol/sdk` (ACP)，见 `src/provider/copilot.js` + `src/provider/acp.js`
 - Gemini provider：已实现，复用 ACP，见 `src/provider/gemini.js` + `src/provider/acp.js`
 - Cursor provider：已实现，复用 ACP，见 `src/provider/cursor.js` + `src/provider/acp.js`
+- OpenCode provider：已实现，spawn + NDJSON 解析，见 `src/provider/opencode.js`
