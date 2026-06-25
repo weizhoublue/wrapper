@@ -30,11 +30,11 @@ jobs:
         id: ref
         run: echo "name=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> $GITHUB_OUTPUT
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -47,7 +47,7 @@ jobs:
       - run: npm run build:patch
 
       - name: Cache pkg binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.pkg-cache
           key: pkg-cache-${{ runner.os }}-${{ runner.arch }}
@@ -56,7 +56,7 @@ jobs:
 
       - run: mv dist/wrapper dist/${{ matrix.artifact }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}-${{ steps.ref.outputs.name }}
           path: dist/${{ matrix.artifact }}
@@ -67,20 +67,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Sanitize ref name
         id: ref
         run: echo "name=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> $GITHUB_OUTPUT
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           pattern: wrapper-*-${{ steps.ref.outputs.name }}
           path: dist
           merge-multiple: true
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/wrapper*
