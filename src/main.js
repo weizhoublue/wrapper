@@ -69,13 +69,13 @@ const HELP = `用法: wrapper -p <提示词> [选项]
     退出码   = 最后一个 agent 的退出码
 
 例子:
-    wrapper -t claude -c "claude-free" -p "say hi in one word"
+    wrapper -t claude -c "claude-deepseek-flash" -p "say hi in one word"
 
-    wrapper -t claude -c "claude-free" -e "bingo|Bingo" -p "please say bingo in english"
+    wrapper -t claude -c "claude-deepseek-flash" -e "bingo|Bingo" -p "please say bingo in english"
 
-    wrapper -t claude -c "claude-free" -p "tomorow will rain" 2>/tmp/sid
+    wrapper -t claude -c "claude-deepseek-flash"  -p "tomorow will rain" 2>/tmp/sid
     session=$(tail -1 /tmp/sid)
-    wrapper -t claude -c "claude-free" -s \${session} -p "tell me all what I have said in this session"
+    wrapper -t claude -c "claude-deepseek-flash" -s \${session} -p "tell me all what I have said in this session"
 
 多 agent fallback 例子:
     wrapper -t claude -c "claude-deepseek-flash" -t codex -t copilot -d -p  "say hi in one word" 2>/tmp/sid
@@ -113,7 +113,12 @@ opencode:
     wrapper -t opencode -s \${session} -p "tell me all what I have said in this session"
 
 debug:
-    wrapper -t claude -c "claude-free" -d -p "say hi in one word"
+    wrapper -t claude -c "claude-deepseek-flash" -d -p "tomorow will rain" 2>/tmp/sid
+    agentName=$( sed '$d' /tmp/sid | sed -n '$p' )
+    session=$(tail -1 /tmp/sid)
+    echo ""
+    cat /tmp/sid
+    grep "attempt session" /tmp/sid
 `;
 
 function parseArgs(argv) {
@@ -391,7 +396,7 @@ async function main() {
     try {
       const maxAttempts = Math.max(1, opts.retry);
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        log.info("agent %s attempt %d/%d session=%s", agent.commandName, attempt + 1, maxAttempts, session.sessionId || "(pending)");
+        log.info("agent %s attempt session %d/%d session=%s", agent.commandName, attempt + 1, maxAttempts, session.sessionId || "(pending)");
 
         if (opts.timeout > 0 && session.deadline !== undefined) {
           session.deadline = Date.now() + opts.timeout * 1000;
@@ -402,7 +407,7 @@ async function main() {
           lastResult = await provider.send(session, opts.prompt);
         } catch (err) {
           const duration = ((performance.now() - attemptStartTime) / 1000).toFixed(2);
-          log.debug("agent %s attempt %d failed, duration: %ss", agent.commandName, attempt + 1, duration);
+          log.debug("agent %s attempt session %d failed, duration: %ss", agent.commandName, attempt + 1, duration);
           log.error("provider send failed for %s: %s", agent.commandName, err.message);
           allResults.push({
             commandName: agent.commandName,
@@ -417,10 +422,10 @@ async function main() {
         }
 
         const duration = ((performance.now() - attemptStartTime) / 1000).toFixed(2);
-        log.debug("agent %s attempt %d finished, duration: %ss", agent.commandName, attempt + 1, duration);
+        log.debug("agent %s attempt session %d finished, duration: %ss", agent.commandName, attempt + 1, duration);
 
         if (lastResult.timedOut) {
-          log.error("agent %s attempt %d: timed out after %ds", agent.commandName, attempt + 1, opts.timeout);
+          log.error("agent %s attempt session %d: timed out after %ds", agent.commandName, attempt + 1, opts.timeout);
           log.debug("attempt %d stdout:\n%s", attempt + 1, lastResult.stdout || "(empty)");
           log.debug("attempt %d stderr:\n%s", attempt + 1, lastResult.stderr || "(empty)");
           if (attempt + 1 >= maxAttempts) {
@@ -440,7 +445,7 @@ async function main() {
         if (lastResult.exitCode && lastResult.exitCode !== 0) {
           if (opts.quota && isQuotaExceeded(agent.type, lastResult.stdout, lastResult.stderr)) {
             const pattern = LimitMsg[agent.type];
-            log.error("agent %s attempt %d: quota exceeded — /%s/i matched",
+            log.error("agent %s attempt session %d: quota exceeded — /%s/i matched",
               agent.commandName, attempt + 1, pattern);
             allResults.push({
               commandName: agent.commandName,
@@ -455,7 +460,7 @@ async function main() {
             break;
           }
 
-          log.error("agent %s attempt %d: non-zero exit code %d", agent.commandName, attempt + 1, lastResult.exitCode);
+          log.error("agent %s attempt session %d: non-zero exit code %d", agent.commandName, attempt + 1, lastResult.exitCode);
           allResults.push({
             commandName: agent.commandName,
             stdout: lastResult.stdout || "",
@@ -470,7 +475,7 @@ async function main() {
 
         if (excludeRegex && excludeRegex.test(lastResult.stdout)) {
           const reason = excludeReason(lastResult.stdout, excludeRegex);
-          log.error("agent %s attempt %d: excluded pattern matched — %s", agent.commandName, attempt + 1, reason);
+          log.error("agent %s attempt session %d: excluded pattern matched — %s", agent.commandName, attempt + 1, reason);
           allResults.push({
             commandName: agent.commandName,
             stdout: lastResult.stdout || "",
@@ -495,14 +500,14 @@ async function main() {
           break;
         }
 
-        log.error("agent %s attempt %d: retry needed — %s", agent.commandName, attempt + 1, retryReason(lastResult.stdout, regex));
-        log.debug("attempt %d stdout:\n%s", attempt + 1, lastResult.stdout || "(empty)");
-        log.debug("attempt %d stderr:\n%s", attempt + 1, lastResult.stderr || "(empty)");
+        log.error("agent %s attempt session %d: retry needed — %s", agent.commandName, attempt + 1, retryReason(lastResult.stdout, regex));
+        log.debug("attempt session %d stdout:\n%s", attempt + 1, lastResult.stdout || "(empty)");
+        log.debug("attempt session %d stderr:\n%s", attempt + 1, lastResult.stderr || "(empty)");
       }
 
       // retry exhausted but not marked agentDone
       if (!agentSuccess && !agentDone) {
-        log.error("agent %s: all %d attempts exhausted: %s", agent.commandName, maxAttempts, retryReason(lastResult.stdout, regex));
+        log.error("agent %s: all %d attempt session exhausted: %s", agent.commandName, maxAttempts, retryReason(lastResult.stdout, regex));
         allResults.push({
           commandName: agent.commandName,
           stdout: lastResult?.stdout || "",
