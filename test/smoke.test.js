@@ -42,6 +42,11 @@ describe("wrapper smoke", () => {
   it("debug flag enables debug output", { skip: !hasClaude }, async () => {
     const result = await runCommu(["-p", "say no", "-d"]);
     assert.ok(result.stderr.includes("[wrapper][debug]"), "has debug log in stderr");
+    assert.match(
+      result.stderr,
+      /\[wrapper\]\[debug\].* finished, duration: \d+\.\d+s/,
+      "stderr should log the attempt duration"
+    );
   });
 
   it("retry on regex mismatch", { skip: !hasClaude }, async () => {
