@@ -60,16 +60,26 @@ function which(cmd) {
 const REQUIRED_FLAGS = ["--dangerously-skip-permissions", "--permission-mode=bypassPermissions"];
 
 function ensureFlags(args, resume) {
-  const out = [...args];
-  for (const flag of REQUIRED_FLAGS) {
-    if (flag === "--permission-mode=bypassPermissions") {
-      const hasPM = out.some((a, i) =>
-        a === "--permission-mode=bypassPermissions" ||
-        (a === "--permission-mode" && out[i + 1] === "bypassPermissions")
-      );
-      if (!hasPM) out.push("--permission-mode", "bypassPermissions");
-    } else if (!out.includes(flag)) {
-      out.push(flag);
+  let out = [...args];
+  if (isRootUser()) {
+    const beforeLen = out.length;
+    out = removePermissionFlags(out);
+    if (out.length < beforeLen) {
+      log.debug("claude provider: running as root user, removed permission flags from args");
+    } else {
+      log.debug("claude provider: running as root user, skipping default required permission flags");
+    }
+  } else {
+    for (const flag of REQUIRED_FLAGS) {
+      if (flag === "--permission-mode=bypassPermissions") {
+        const hasPM = out.some((a, i) =>
+          a === "--permission-mode=bypassPermissions" ||
+          (a === "--permission-mode" && out[i + 1] === "bypassPermissions")
+        );
+        if (!hasPM) out.push("--permission-mode", "bypassPermissions");
+      } else if (!out.includes(flag)) {
+        out.push(flag);
+      }
     }
   }
   // Append --resume if specified and not already present
@@ -91,12 +101,18 @@ async function createSession({ command, timeout, resume }) {
 
   const input = createAsyncMessageInput();
 
+  const isRoot = isRootUser();
   const sdkOptions = {
     pathToClaudeCodeExecutable: resolved,
-    permissionMode: "bypassPermissions",
-    allowDangerouslySkipPermissions: true,
     includePartialMessages: true,
   };
+
+  if (!isRoot) {
+    sdkOptions.permissionMode = "bypassPermissions";
+    sdkOptions.allowDangerouslySkipPermissions = true;
+  } else {
+    log.debug("claude provider: running as root user, disabling permission bypass in sdkOptions");
+  }
 
   if (args.length > 0) {
     sdkOptions.spawnClaudeCodeProcess = (spawnOpts) => {
@@ -203,5 +219,42 @@ async function run(opts) {
     await closeSession(session);
   }
 }
+function isRootUser() {
+  return typeof process.getuid === "function" && process.getuid() === 0;
+}
 
-module.exports = { createSession, send, closeSession, run, extractText, extractThinking, extractSessionId, splitCommand };
+function removePermissionFlags(args) {
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--dangerously-skip-permissions") {
+      continue;
+    }
+    if (arg === "--permission-mode=bypassPermissions") {
+      continue;
+    }
+    if (arg === "--permission-mode") {
+      if (args[i + 1] === "bypassPermissions") {
+        i++;
+        continue;
+      }
+    }
+    out.push(arg);
+  }
+  return out;
+}
+
+module.exports = {
+  createSession,
+  send,
+  closeSession,
+  run,
+  extractText,
+  extractThinking,
+  extractSessionId,
+  splitCommand,
+  isRootUser,
+  removePermissionFlags,
+  ensureFlags
+};
+
