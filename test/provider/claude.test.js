@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { extractText, extractThinking, extractSessionId, splitCommand } = require("../../src/provider/claude");
+const { extractText, extractThinking, extractSessionId, splitCommand, isRootUser, removePermissionFlags } = require("../../src/provider/claude");
 
 describe("Claude provider - extractText", () => {
   it("extracts text from assistant messages", () => {
@@ -93,3 +93,46 @@ describe("splitCommand", () => {
     assert.deepStrictEqual(result, { command: "claude", args: ["--verbose"] });
   });
 });
+
+describe("isRootUser", () => {
+  it("returns true if process.getuid() is 0", () => {
+    const origGetuid = process.getuid;
+    process.getuid = () => 0;
+    try {
+      assert.strictEqual(isRootUser(), true);
+    } finally {
+      process.getuid = origGetuid;
+    }
+  });
+
+  it("returns false if process.getuid() is not 0", () => {
+    const origGetuid = process.getuid;
+    if (origGetuid) {
+      process.getuid = () => 1000;
+      try {
+        assert.strictEqual(isRootUser(), false);
+      } finally {
+        process.getuid = origGetuid;
+      }
+    }
+  });
+});
+
+describe("removePermissionFlags", () => {
+  it("filters out permission bypass flags from string array", () => {
+    const input = [
+      "--dangerously-skip-permissions",
+      "--permission-mode=bypassPermissions",
+      "--permission-mode",
+      "bypassPermissions",
+      "some-other-arg"
+    ];
+    assert.deepStrictEqual(removePermissionFlags(input), ["some-other-arg"]);
+  });
+
+  it("leaves other flags untouched", () => {
+    const input = ["claude", "--resume", "abc-123"];
+    assert.deepStrictEqual(removePermissionFlags(input), ["claude", "--resume", "abc-123"]);
+  });
+});
+

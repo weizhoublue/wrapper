@@ -203,5 +203,41 @@ async function run(opts) {
     await closeSession(session);
   }
 }
+function isRootUser() {
+  return typeof process.getuid === "function" && process.getuid() === 0;
+}
 
-module.exports = { createSession, send, closeSession, run, extractText, extractThinking, extractSessionId, splitCommand };
+function removePermissionFlags(args) {
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--dangerously-skip-permissions") {
+      continue;
+    }
+    if (arg === "--permission-mode=bypassPermissions") {
+      continue;
+    }
+    if (arg === "--permission-mode") {
+      if (args[i + 1] === "bypassPermissions") {
+        i++;
+        continue;
+      }
+    }
+    out.push(arg);
+  }
+  return out;
+}
+
+module.exports = {
+  createSession,
+  send,
+  closeSession,
+  run,
+  extractText,
+  extractThinking,
+  extractSessionId,
+  splitCommand,
+  isRootUser,
+  removePermissionFlags
+};
+
