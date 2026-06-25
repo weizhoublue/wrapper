@@ -397,9 +397,12 @@ async function main() {
           session.deadline = Date.now() + opts.timeout * 1000;
         }
 
+        const attemptStartTime = performance.now();
         try {
           lastResult = await provider.send(session, opts.prompt);
         } catch (err) {
+          const duration = ((performance.now() - attemptStartTime) / 1000).toFixed(2);
+          log.debug("agent %s attempt %d failed, duration: %ss", agent.commandName, attempt + 1, duration);
           log.error("provider send failed for %s: %s", agent.commandName, err.message);
           allResults.push({
             commandName: agent.commandName,
@@ -412,6 +415,9 @@ async function main() {
           agentDone = true;
           break; // fallback to next agent
         }
+
+        const duration = ((performance.now() - attemptStartTime) / 1000).toFixed(2);
+        log.debug("agent %s attempt %d finished, duration: %ss", agent.commandName, attempt + 1, duration);
 
         if (lastResult.timedOut) {
           log.error("agent %s attempt %d: timed out after %ds", agent.commandName, attempt + 1, opts.timeout);
