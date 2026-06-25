@@ -1,7 +1,25 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { extractText, extractThinking, extractSessionId, splitCommand, isRootUser, removePermissionFlags, ensureFlags } = require("../../src/provider/claude");
+// Mock the SDK before requiring claude provider
+let queryOptionsUsed = null;
+const sdkPath = require.resolve("@anthropic-ai/claude-agent-sdk");
+require.cache[sdkPath] = {
+  id: sdkPath,
+  filename: sdkPath,
+  loaded: true,
+  exports: {
+    query: (args) => {
+      queryOptionsUsed = args.options;
+      return (async function* () {})();
+    }
+  }
+};
+
+const claudePath = require.resolve("../../src/provider/claude");
+delete require.cache[claudePath];
+
+const { createSession, extractText, extractThinking, extractSessionId, splitCommand, isRootUser, removePermissionFlags, ensureFlags } = require("../../src/provider/claude");
 
 describe("Claude provider - extractText", () => {
   it("extracts text from assistant messages", () => {
@@ -161,6 +179,53 @@ describe("ensureFlags", () => {
       } finally {
         process.getuid = origGetuid;
       }
+    }
+  });
+});
+
+describe("Claude provider - createSession", () => {
+  it("includes permission bypass in sdkOptions when not running as root", async () => {
+    const origGetuid = process.getuid;
+    process.getuid = () => 1000; // non-root
+    queryOptionsUsed = null;
+    
+    try {
+      await createSession({ command: "node", timeout: 10 });
+      assert.ok(queryOptionsUsed);
+      assert.strictEqual(queryOptionsUsed.permissionMode, "bypassPermissions");
+      assert.strictEqual(queryOptionsUsed.allowDangerouslySkipPermissions, true);
+    } finally {
+      process.getuid = origGetuid;
+    }
+  });
+
+  it("omits permission bypass and logs debug when running as root", async () => {
+    const origGetuid = process.getuid;
+    process.getuid = () => 0; // root
+    queryOptionsUsed = null;
+    
+    const log = require("../../src/log");
+    const originalDebug = log.debug;
+    const isDebugEnabled = log.isDebug();
+    log.setDebug(true);
+    let debugLogged = false;
+    log.debug = (format, ...args) => {
+      if (format.includes("running as root user, disabling permission bypass")) {
+        debugLogged = true;
+      }
+      originalDebug(format, ...args);
+    };
+
+    try {
+      await createSession({ command: "node", timeout: 10 });
+      assert.ok(queryOptionsUsed);
+      assert.strictEqual(queryOptionsUsed.permissionMode, undefined);
+      assert.strictEqual(queryOptionsUsed.allowDangerouslySkipPermissions, undefined);
+      assert.strictEqual(debugLogged, true);
+    } finally {
+      process.getuid = origGetuid;
+      log.debug = originalDebug;
+      log.setDebug(isDebugEnabled);
     }
   });
 });

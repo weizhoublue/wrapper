@@ -101,12 +101,18 @@ async function createSession({ command, timeout, resume }) {
 
   const input = createAsyncMessageInput();
 
+  const isRoot = isRootUser();
   const sdkOptions = {
     pathToClaudeCodeExecutable: resolved,
-    permissionMode: "bypassPermissions",
-    allowDangerouslySkipPermissions: true,
     includePartialMessages: true,
   };
+
+  if (!isRoot) {
+    sdkOptions.permissionMode = "bypassPermissions";
+    sdkOptions.allowDangerouslySkipPermissions = true;
+  } else {
+    log.debug("claude provider: running as root user, disabling permission bypass in sdkOptions");
+  }
 
   if (args.length > 0) {
     sdkOptions.spawnClaudeCodeProcess = (spawnOpts) => {
