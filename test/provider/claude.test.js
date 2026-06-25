@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { extractText, extractThinking, extractSessionId, splitCommand, isRootUser, removePermissionFlags } = require("../../src/provider/claude");
+const { extractText, extractThinking, extractSessionId, splitCommand, isRootUser, removePermissionFlags, ensureFlags } = require("../../src/provider/claude");
 
 describe("Claude provider - extractText", () => {
   it("extracts text from assistant messages", () => {
@@ -135,4 +135,34 @@ describe("removePermissionFlags", () => {
     assert.deepStrictEqual(removePermissionFlags(input), ["claude", "--resume", "abc-123"]);
   });
 });
+
+describe("ensureFlags", () => {
+  it("skips appending and filters existing bypass flags when running as root", () => {
+    const origGetuid = process.getuid;
+    process.getuid = () => 0; // Simulate root
+    try {
+      const input = ["claude", "--dangerously-skip-permissions", "--resume", "abc"];
+      const out = ensureFlags(input, "def");
+      assert.deepStrictEqual(out, ["claude", "--resume", "abc"]);
+    } finally {
+      process.getuid = origGetuid;
+    }
+  });
+
+  it("appends required flags when not running as root", () => {
+    const origGetuid = process.getuid;
+    if (origGetuid) {
+      process.getuid = () => 1000; // Simulate non-root
+      try {
+        const input = ["claude"];
+        const out = ensureFlags(input);
+        assert.ok(out.includes("--dangerously-skip-permissions"));
+        assert.ok(out.includes("--permission-mode"));
+      } finally {
+        process.getuid = origGetuid;
+      }
+    }
+  });
+});
+
 

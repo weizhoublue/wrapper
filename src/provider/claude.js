@@ -60,16 +60,26 @@ function which(cmd) {
 const REQUIRED_FLAGS = ["--dangerously-skip-permissions", "--permission-mode=bypassPermissions"];
 
 function ensureFlags(args, resume) {
-  const out = [...args];
-  for (const flag of REQUIRED_FLAGS) {
-    if (flag === "--permission-mode=bypassPermissions") {
-      const hasPM = out.some((a, i) =>
-        a === "--permission-mode=bypassPermissions" ||
-        (a === "--permission-mode" && out[i + 1] === "bypassPermissions")
-      );
-      if (!hasPM) out.push("--permission-mode", "bypassPermissions");
-    } else if (!out.includes(flag)) {
-      out.push(flag);
+  let out = [...args];
+  if (isRootUser()) {
+    const beforeLen = out.length;
+    out = removePermissionFlags(out);
+    if (out.length < beforeLen) {
+      log.debug("claude provider: running as root user, removed permission flags from args");
+    } else {
+      log.debug("claude provider: running as root user, skipping default required permission flags");
+    }
+  } else {
+    for (const flag of REQUIRED_FLAGS) {
+      if (flag === "--permission-mode=bypassPermissions") {
+        const hasPM = out.some((a, i) =>
+          a === "--permission-mode=bypassPermissions" ||
+          (a === "--permission-mode" && out[i + 1] === "bypassPermissions")
+        );
+        if (!hasPM) out.push("--permission-mode", "bypassPermissions");
+      } else if (!out.includes(flag)) {
+        out.push(flag);
+      }
     }
   }
   // Append --resume if specified and not already present
@@ -238,6 +248,7 @@ module.exports = {
   extractSessionId,
   splitCommand,
   isRootUser,
-  removePermissionFlags
+  removePermissionFlags,
+  ensureFlags
 };
 
