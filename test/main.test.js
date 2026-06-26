@@ -128,6 +128,16 @@ describe("parseArgs", () => {
       /conflicting options: -q\/\--quota and -n\/\--no-quota/,
     );
   });
+
+  it("sets isCustom to true when -c/--command is specified", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "-t", "claude", "-c", "my-claude"]);
+    assert.strictEqual(opts.agents[0].isCustom, true);
+  });
+
+  it("sets isCustom to undefined/falsy when -c/--command is not specified", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi"]);
+    assert.strictEqual(opts.agents[0].isCustom, undefined);
+  });
 });
 
 describe("parseArgs multi-agent", () => {

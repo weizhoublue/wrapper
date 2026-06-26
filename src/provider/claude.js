@@ -59,15 +59,19 @@ function which(cmd) {
 // permissions and hang waiting for stdin input.
 const REQUIRED_FLAGS = ["--dangerously-skip-permissions", "--permission-mode=bypassPermissions"];
 
-function ensureFlags(args, resume) {
+function ensureFlags(args, resume, isCustom) {
   let out = [...args];
   if (isRootUser()) {
-    const beforeLen = out.length;
-    out = removePermissionFlags(out);
-    if (out.length < beforeLen) {
-      log.debug("claude provider: running as root user, removed permission flags from args");
+    if (isCustom) {
+      log.debug("claude provider: running as root user with custom command, respecting user flags");
     } else {
-      log.debug("claude provider: running as root user, skipping default required permission flags");
+      const beforeLen = out.length;
+      out = removePermissionFlags(out);
+      if (out.length < beforeLen) {
+        log.debug("claude provider: running as root user, removed permission flags from args");
+      } else {
+        log.debug("claude provider: running as root user, skipping default required permission flags");
+      }
     }
   } else {
     for (const flag of REQUIRED_FLAGS) {
@@ -89,9 +93,9 @@ function ensureFlags(args, resume) {
   return out;
 }
 
-async function createSession({ command, timeout, resume }) {
+async function createSession({ command, timeout, resume, isCustom }) {
   const { command: cmd, args: rawArgs } = splitCommand(command);
-  const args = ensureFlags(rawArgs, resume);
+  const args = ensureFlags(rawArgs, resume, isCustom);
 
   const resolved = which(cmd);
   if (!resolved) {
@@ -111,7 +115,24 @@ async function createSession({ command, timeout, resume }) {
     sdkOptions.permissionMode = "bypassPermissions";
     sdkOptions.allowDangerouslySkipPermissions = true;
   } else {
-    log.debug("claude provider: running as root user, disabling permission bypass in sdkOptions");
+    if (isCustom) {
+      const hasPermissionBypass = args.some((a, i) =>
+        a === "--permission-mode=bypassPermissions" ||
+        (a === "--permission-mode" && args[i + 1] === "bypassPermissions")
+      );
+      const hasSkipPermissions = args.includes("--dangerously-skip-permissions");
+
+      if (hasPermissionBypass) {
+        sdkOptions.permissionMode = "bypassPermissions";
+      }
+      if (hasSkipPermissions) {
+        sdkOptions.allowDangerouslySkipPermissions = true;
+      }
+      log.debug("claude provider: running as root user with custom command, set sdkOptions dynamically: permissionMode=%s, allowDangerouslySkip=%s",
+        sdkOptions.permissionMode, sdkOptions.allowDangerouslySkipPermissions);
+    } else {
+      log.debug("claude provider: running as root user, disabling permission bypass in sdkOptions");
+    }
   }
 
   if (args.length > 0) {
