@@ -181,6 +181,18 @@ describe("ensureFlags", () => {
       }
     }
   });
+
+  it("does not filter flags when running as root and isCustom is true", () => {
+    const origGetuid = process.getuid;
+    process.getuid = () => 0; // Simulate root
+    try {
+      const input = ["--dangerously-skip-permissions", "--resume", "abc"];
+      const out = ensureFlags(input, "def", true);
+      assert.deepStrictEqual(out, ["--dangerously-skip-permissions", "--resume", "abc"]);
+    } finally {
+      process.getuid = origGetuid;
+    }
+  });
 });
 
 describe("Claude provider - createSession", () => {
@@ -226,6 +238,42 @@ describe("Claude provider - createSession", () => {
       process.getuid = origGetuid;
       log.debug = originalDebug;
       log.setDebug(isDebugEnabled);
+    }
+  });
+
+  it("enables permission bypass in sdkOptions when running as root with isCustom=true and options are present in command", async () => {
+    const origGetuid = process.getuid;
+    process.getuid = () => 0; // root
+    queryOptionsUsed = null;
+    try {
+      await createSession({
+        command: "node --dangerously-skip-permissions --permission-mode=bypassPermissions",
+        timeout: 10,
+        isCustom: true
+      });
+      assert.ok(queryOptionsUsed);
+      assert.strictEqual(queryOptionsUsed.permissionMode, "bypassPermissions");
+      assert.strictEqual(queryOptionsUsed.allowDangerouslySkipPermissions, true);
+    } finally {
+      process.getuid = origGetuid;
+    }
+  });
+
+  it("omits permission bypass in sdkOptions when running as root with isCustom=true but options are NOT present in command", async () => {
+    const origGetuid = process.getuid;
+    process.getuid = () => 0; // root
+    queryOptionsUsed = null;
+    try {
+      await createSession({
+        command: "node",
+        timeout: 10,
+        isCustom: true
+      });
+      assert.ok(queryOptionsUsed);
+      assert.strictEqual(queryOptionsUsed.permissionMode, undefined);
+      assert.strictEqual(queryOptionsUsed.allowDangerouslySkipPermissions, undefined);
+    } finally {
+      process.getuid = origGetuid;
     }
   });
 });

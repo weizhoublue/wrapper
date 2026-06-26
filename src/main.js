@@ -165,6 +165,7 @@ function parseArgs(argv) {
       }
       agents[agents.length - 1].command = value;
       agents[agents.length - 1].commandName = value;
+      agents[agents.length - 1].isCustom = true;
       lastToken = "command";
       continue;
     }
@@ -367,6 +368,7 @@ async function main() {
         command: agent.command,
         timeout: opts.timeout,
         resume: opts.resume,
+        isCustom: agent.isCustom || false,
       });
     } catch (err) {
       log.error("failed to create session for %s: %s", agent.commandName, err.message);
