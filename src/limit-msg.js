@@ -1,6 +1,6 @@
 const LimitMsg = {
-  // 未触发，未知
-  claude: "",
+  // 多种模型: deepseek
+  claude: "FreeUsageLimitError",
   // 未触发，未知
   cursor: "",
   codex: "hit your usage limit",
