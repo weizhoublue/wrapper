@@ -450,6 +450,21 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(stderrData.includes("quota exceeded: /You have exhausted your capacity/i matched"));
   });
 
+  it("exits 206 when claude quota pattern matches on non-zero exit", async () => {
+    mockProviders.claude.sendMock = () => ({
+      stdout: "",
+      stderr: "FreeUsageLimitError",
+      sessionId: "claude-session",
+      exitCode: 1,
+    });
+
+    await runMain(["-t", "claude", "-p", "hello"]);
+
+    assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
+    assert.ok(stderrData.includes("[claude] error:"));
+    assert.ok(stderrData.includes("quota exceeded: /FreeUsageLimitError/i matched"));
+  });
+
   it("falls back to next agent when first agent hits quota", async () => {
     mockProviders.codex.sendMock = () => ({
       stdout: "",

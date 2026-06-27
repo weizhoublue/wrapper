@@ -267,6 +267,7 @@ describe("exit codes", () => {
 describe("LimitMsg", () => {
   it("matches sample output for every agent with a non-empty pattern", () => {
     const samples = {
+      claude: { stdout: "", stderr: "FreeUsageLimitError" },
       codex: { stdout: "", stderr: "You've hit your usage limit" },
       copilot: { stdout: "", stderr: "You have exceeded your monthly quota" },
       gemini: { stdout: "", stderr: "You have exhausted your capacity" },
@@ -278,7 +279,7 @@ describe("LimitMsg", () => {
   });
 
   it("has empty pattern for agents without known quota messages", () => {
-    for (const type of ["claude", "cursor", "agy"]) {
+    for (const type of ["cursor", "agy"]) {
       assert.strictEqual(LimitMsg[type], "", type);
     }
   });
@@ -300,7 +301,7 @@ describe("isQuotaExceeded", () => {
   });
 
   it("returns false for agents with empty LimitMsg", () => {
-    for (const type of ["claude", "cursor", "agy"]) {
+    for (const type of ["cursor", "agy"]) {
       assert.strictEqual(
         isQuotaExceeded(type, "", "hit your usage limit"),
         false,
@@ -312,6 +313,13 @@ describe("isQuotaExceeded", () => {
   it("matches gemini stderr pattern", () => {
     assert.strictEqual(
       isQuotaExceeded("gemini", "", "You have exhausted your capacity"),
+      true,
+    );
+  });
+
+  it("matches claude stderr pattern", () => {
+    assert.strictEqual(
+      isQuotaExceeded("claude", "", "FreeUsageLimitError"),
       true,
     );
   });
@@ -421,4 +429,3 @@ describe("buildStderrOutput", () => {
     assert.ok(result.includes("[codex] error:\nquota exceeded: /hit your usage limit/i matched"));
   });
 });
-
