@@ -108,6 +108,7 @@ cursor:
 
 opencode:
     wrapper -t opencode -p "say hi in one word"
+    wrapper --type opencode -c "opencode --model=opencode-go/deepseek-v4-flash --variant=high --thinking=true"  -p "hi"
 
     wrapper -t opencode -p "tomorrow will rain" 2>/tmp/sid
     session=$(tail -1 /tmp/sid)
