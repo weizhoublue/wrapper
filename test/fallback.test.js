@@ -343,6 +343,33 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(stderrData.includes("failed, falling back to next agent"), "Should log fallback at error level");
   });
 
+  it("logs stdout and stderr output character counts in debug mode", async () => {
+    mockProviders.claude.sendMock = (session) => {
+      return {
+        stdout: "Hello\n世界",
+        stderr: "err!",
+        sessionId: session.sessionId,
+        exitCode: 0,
+      };
+    };
+
+    await runMain(["-t", "claude", "-p", "hello", "-d"]);
+
+    assert.strictEqual(exitCode, EXIT_OK);
+    assert.ok(
+      /agent claude attempt session 1 finished, duration: \d+\.\d{2} seconds/.test(stderrData),
+      "should keep existing duration debug log",
+    );
+    assert.ok(
+      stderrData.includes("agent claude attempt session 1 stdout output chars: 8"),
+      "should log stdout .length character count",
+    );
+    assert.ok(
+      stderrData.includes("agent claude attempt session 1 stderr output chars: 4"),
+      "should log stderr .length character count",
+    );
+  });
+
   it("reports regex mismatch failure in stderr without debug", async () => {
     mockProviders.claude.sendMock = () => {
       return { stdout: "Hello!", stderr: "", sessionId: "claude-session", exitCode: 0 };
