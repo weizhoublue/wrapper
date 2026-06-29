@@ -8,8 +8,9 @@ const LimitMsg = {
   gemini: "You have exhausted your capacity",
   // 超额时，它的返回码 0，没有消息，无法检测
   agy: "",
-  // 超额时，它就卡住不退出，无法检测
-  opencode: "",
+  // 超额时，开源 opencode 它就卡住一直重试不退出，无法检测
+  // 因此，我自己修改了一个版本来支持超额检测退出，并给出提示信息
+  opencode: "free_tier_limit|account_rate_limit",
 };
 
 function isQuotaExceeded(agentType, stdout, stderr) {
