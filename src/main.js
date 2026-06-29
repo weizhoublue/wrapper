@@ -425,7 +425,7 @@ async function main() {
         }
 
         const duration = ((performance.now() - attemptStartTime) / 1000).toFixed(2);
-        log.debug("agent %s attempt session %d finished, duration: %ss", agent.commandName, attempt + 1, duration);
+        log.debug("agent %s attempt session %d finished, duration: %s seconds", agent.commandName, attempt + 1, duration);
         log.debug("agent %s attempt session %d stdout output chars: %d",
           agent.commandName, attempt + 1, (lastResult.stdout || "").length);
         log.debug("agent %s attempt session %d stderr output chars: %d",
