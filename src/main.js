@@ -84,6 +84,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
 
 codex:
     wrapper -t codex -p "say hi in one word"
+    wrapper -t codex -c codex-cheap -p "say hi in one word"
 
     wrapper -t codex  -p "tomorrow will rain" 2>/tmp/sid
     session=$(tail -1 /tmp/sid)

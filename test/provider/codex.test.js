@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { extractText, extractThinking, extractSessionId, splitCommand } = require("../../src/provider/codex");
+const { extractText, extractThinking, extractSessionId, splitCommand, ensureFlags } = require("../../src/provider/codex");
 
 describe("Codex provider - extractText", () => {
   it("extracts text from agent_message items", () => {
@@ -69,5 +69,16 @@ describe("Codex provider - splitCommand", () => {
       command: "codex",
       args: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox"],
     });
+  });
+});
+
+describe("Codex provider - ensureFlags", () => {
+  it("prepends exec for bare custom commands", () => {
+    assert.deepStrictEqual(ensureFlags([], ""), [
+      "exec",
+      "--json",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--skip-git-repo-check",
+    ]);
   });
 });
