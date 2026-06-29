@@ -47,8 +47,9 @@ const REQUIRED_FLAGS = ["--json", "--dangerously-bypass-approvals-and-sandbox", 
 
 function ensureFlags(args, resume) {
   const out = [...args];
-  // Only inject for "codex exec" subcommand
-  if (!out.includes("exec")) return out;
+  if (!out.includes("exec")) {
+    out.unshift("exec");
+  }
 
   // Insert "resume <id>" after "exec" if -s was specified and not already present
   if (resume && !out.includes("resume")) {
@@ -200,4 +201,4 @@ async function run(opts) {
   }
 }
 
-module.exports = { createSession, send, closeSession, run, extractText, extractThinking, extractSessionId, splitCommand };
+module.exports = { createSession, send, closeSession, run, extractText, extractThinking, extractSessionId, splitCommand, ensureFlags };
