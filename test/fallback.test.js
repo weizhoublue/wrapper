@@ -357,7 +357,7 @@ describe("multi-agent fallback E2E", () => {
 
     assert.strictEqual(exitCode, EXIT_OK);
     assert.ok(
-      /agent claude attempt session 1 finished, duration: \d+\.\d{2}s/.test(stderrData),
+      /agent claude attempt session 1 finished, duration: \d+\.\d{2} seconds/.test(stderrData),
       "should keep existing duration debug log",
     );
     assert.ok(
