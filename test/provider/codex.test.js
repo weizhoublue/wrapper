@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { extractText, extractThinking, extractSessionId, splitCommand, ensureFlags } = require("../../src/provider/codex");
+const { extractText, extractThinking, extractSessionId, splitCommand, ensureFlags, insertResumeAfterExec } = require("../../src/provider/codex");
 
 describe("Codex provider - extractText", () => {
   it("extracts text from agent_message items", () => {
@@ -80,5 +80,32 @@ describe("Codex provider - ensureFlags", () => {
       "--dangerously-bypass-approvals-and-sandbox",
       "--skip-git-repo-check",
     ]);
+  });
+});
+
+describe("Codex provider - insertResumeAfterExec", () => {
+  const baseArgs = ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"];
+
+  it("inserts resume after exec when sessionId is set", () => {
+    const out = insertResumeAfterExec(baseArgs, "thread-abc-123");
+    assert.deepStrictEqual(out, [
+      "exec", "resume", "thread-abc-123",
+      "--json", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check",
+    ]);
+  });
+
+  it("returns args unchanged when sessionId is null", () => {
+    assert.deepStrictEqual(insertResumeAfterExec(baseArgs, null), baseArgs);
+    assert.deepStrictEqual(insertResumeAfterExec(baseArgs, ""), baseArgs);
+  });
+
+  it("does not duplicate resume when already present", () => {
+    const withResume = ["exec", "resume", "existing-id", "--json"];
+    assert.deepStrictEqual(insertResumeAfterExec(withResume, "thread-abc-123"), withResume);
+  });
+
+  it("returns args unchanged when exec subcommand is missing", () => {
+    const noExec = ["--json", "--skip-git-repo-check"];
+    assert.deepStrictEqual(insertResumeAfterExec(noExec, "thread-abc-123"), noExec);
   });
 });

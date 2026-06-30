@@ -71,6 +71,15 @@ function ensureFlags(args, resume) {
   return out;
 }
 
+function insertResumeAfterExec(args, sessionId) {
+  if (!sessionId || args.includes("resume")) return args;
+  const execIdx = args.indexOf("exec");
+  if (execIdx < 0) return args;
+  const out = [...args];
+  out.splice(execIdx + 1, 0, "resume", sessionId);
+  return out;
+}
+
 async function createSession({ command, timeout, resume }) {
   const { command: cmd, args: baseArgs } = splitCommand(command);
 
@@ -201,4 +210,4 @@ async function run(opts) {
   }
 }
 
-module.exports = { createSession, send, closeSession, run, extractText, extractThinking, extractSessionId, splitCommand, ensureFlags };
+module.exports = { createSession, send, closeSession, run, extractText, extractThinking, extractSessionId, splitCommand, ensureFlags, insertResumeAfterExec };
