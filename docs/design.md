@@ -57,7 +57,7 @@ wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 | 输出 | 成功 | 失败 |
 |------|------|------|
 | stdout | 最终成功（或最后一个失败的）Agent 的回答文本（去首尾空行、压缩连续空行） | 最后一个失败 Agent 的回答文本 |
-| stderr | 最后一个 Agent 的 `[agent] stderr:`（失败时另附 `[agent] error:`），倒数第二行为命令名，最后一行为会话 ID | 同上（最后一个失败 Agent） |
+| stderr | 最后一个 Agent 的 `[agent] stderr:`（失败时另附 `[agent] error:`），倒数第五行为空行，倒数第四行为 `[agent session]`，倒数第三行为退出码，倒数第二行为命令名，最后一行为会话 ID | 同上（最后一个失败 Agent） |
 | exit code | 最终成功 Agent 的退出码（通常为 0） | 最后一个 Agent 的退出码或重试耗尽退出码（200-206） |
 
 ### 退出码

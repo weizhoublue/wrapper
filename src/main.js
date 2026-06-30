@@ -66,7 +66,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
 输出:
     stdout  = 最后一个 agent 的标准输出
     stderr  = 最后一个 agent 的标准错误输出（失败时含 [agent] error: 判定原因）
-              倒数第二行为 agent 命令名，最后一行为会话 ID
+              倒数第三行为退出码，倒数第二行为 agent 命令名，最后一行为会话 ID
               多 agent fallback 时，中间失败 agent 的输出仅在 -d 调试日志中可见
     退出码   = 最后一个 agent 的退出码
 
@@ -76,7 +76,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
 claude:
     wrapper -t claude -c "claude-deepseek-flash" -d -p "say hi in one word"
 
-    wrapper -t claude -c "claude-deepseek-flash" -d -e "bingo|Bingo" -p "please say bingo in english"
+    wrapper -t claude -c "claude-deepseek-flash" -d -e "bad" -p "what did I just say?"
 
     wrapper -t claude -c "claude-deepseek-flash" -d  -p "tomorow will rain" 2>/tmp/sid
     session=$(tail -1 /tmp/sid)
@@ -262,17 +262,39 @@ function canRetry(stdout, regex) {
   return false;
 }
 
-function buildStderrOutput(agentCommandName, sessionId, result) {
+function resolveExitCode(result, regex) {
+  if (!result) return EXIT_PROVIDER_ERROR;
+  if (result.sessionCreationFailed) {
+    return result.commandNotFound ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR;
+  }
+  if (result.sendFailed) return EXIT_PROVIDER_ERROR;
+  if (result.timedOut) return EXIT_TIMEOUT;
+  if (result.quotaExceeded) return EXIT_QUOTA_EXCEEDED;
+  if (result.exitCode && result.exitCode !== 0) return result.exitCode;
+  if (result.excludeMatched) return EXIT_EXCLUDE_MATCH;
+  if (result.exhausted) {
+    return isOutputEmpty(result.stdout) ? EXIT_EMPTY_OUTPUT
+      : (regex ? EXIT_REGEX_MISMATCH : EXIT_OK);
+  }
+  return result.exitCode ?? EXIT_OK;
+}
+
+function buildStderrOutput(agentCommandName, sessionId, result, exitCode) {
   const parts = [];
   const name = result.commandName;
 
+  parts.push("");
   parts.push(`[${name}] stderr:`);
   if (result.stderr) parts.push(result.stderr);
   if (result.wrapperError) {
+    parts.push("");
     parts.push(`[${name}] error:`);
     parts.push(result.wrapperError);
   }
 
+  parts.push("");
+  parts.push("[agent session]");
+  parts.push(String(exitCode));
   if (agentCommandName) parts.push(agentCommandName);
   if (sessionId) parts.push(sessionId);
   return parts.join("\n");
@@ -399,8 +421,9 @@ async function main() {
       // last agent — exit
       process.stdout.write("\n");
       const lastEntry = allResults[allResults.length - 1];
-      process.stderr.write(buildStderrOutput(agent.commandName, "", lastEntry) + "\n");
-      process.exit(err.message.startsWith("command not found") ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR);
+      const exitCode = err.message.startsWith("command not found") ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR;
+      process.stderr.write(buildStderrOutput(agent.commandName, "", lastEntry, exitCode) + "\n");
+      process.exit(exitCode);
     }
 
     let lastResult = null;
@@ -561,8 +584,9 @@ async function main() {
       process.stdout.write(out);
       if (!out.endsWith("\n")) process.stdout.write("\n");
       const lastEntry = allResults[allResults.length - 1];
-      process.stderr.write(buildStderrOutput(agent.commandName, lastResult.sessionId || session.sessionId, lastEntry) + "\n");
-      process.exit(lastResult.exitCode || EXIT_OK);
+      const exitCode = lastResult.exitCode || EXIT_OK;
+      process.stderr.write(buildStderrOutput(agent.commandName, lastResult.sessionId || session.sessionId, lastEntry, exitCode) + "\n");
+      process.exit(exitCode);
     }
 
     log.error("agent %s failed, %s", agent.commandName,
@@ -577,34 +601,9 @@ async function main() {
   const out = collapseBlankLines(lastAgentResult?.stdout || "");
   process.stdout.write(out);
   if (!out.endsWith("\n")) process.stdout.write("\n");
-  process.stderr.write(buildStderrOutput(lastAgent.commandName, lastAgentResult?.sessionId || "", lastAgentResult) + "\n");
-
-  if (lastAgentResult) {
-    if (lastAgentResult.sessionCreationFailed) {
-      process.exit(lastAgentResult.commandNotFound ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR);
-    }
-    if (lastAgentResult.sendFailed) {
-      process.exit(EXIT_PROVIDER_ERROR);
-    }
-    if (lastAgentResult.timedOut) {
-      process.exit(EXIT_TIMEOUT);
-    }
-    if (lastAgentResult.quotaExceeded) {
-      process.exit(EXIT_QUOTA_EXCEEDED);
-    }
-    if (lastAgentResult.exitCode && lastAgentResult.exitCode !== 0) {
-      process.exit(lastAgentResult.exitCode);
-    }
-    if (lastAgentResult.excludeMatched) {
-      process.exit(EXIT_EXCLUDE_MATCH);
-    }
-    if (lastAgentResult.exhausted) {
-      const exitCode = isOutputEmpty(lastAgentResult.stdout) ? EXIT_EMPTY_OUTPUT
-        : (regex ? EXIT_REGEX_MISMATCH : EXIT_OK);
-      process.exit(exitCode);
-    }
-  }
-  process.exit(EXIT_PROVIDER_ERROR);
+  const exitCode = resolveExitCode(lastAgentResult, regex);
+  process.stderr.write(buildStderrOutput(lastAgent.commandName, lastAgentResult?.sessionId || "", lastAgentResult, exitCode) + "\n");
+  process.exit(exitCode);
 }
 
 if (require.main === module) {

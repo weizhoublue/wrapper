@@ -139,7 +139,7 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(stdoutData.includes("mock-stdout-copilot"));
     assert.ok(!stderrData.includes("[claude] error:"));
     assert.ok(!stderrData.includes("session creation failed: command not found: claude"));
-    assert.ok(stderrData.endsWith("copilot\nmock-session-copilot\n"));
+    assert.ok(stderrData.endsWith("[agent session]\n0\ncopilot\nmock-session-copilot\n"));
   });
 
   it("first agent fails provider send, second agent succeeds", async () => {
@@ -153,7 +153,7 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(stdoutData.includes("mock-stdout-copilot"));
     assert.ok(!stderrData.includes("[claude] error:"));
     assert.ok(!stderrData.includes("provider send failed: send error"));
-    assert.ok(stderrData.endsWith("copilot\nmock-session-copilot\n"));
+    assert.ok(stderrData.endsWith("[agent session]\n0\ncopilot\nmock-session-copilot\n"));
   });
 
   it("first agent times out, second agent succeeds", async () => {
@@ -168,7 +168,7 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(!stderrData.includes("timeout output"));
     assert.ok(!stderrData.includes("timeout stderr"));
     assert.ok(!stderrData.includes("[claude] error:"));
-    assert.ok(stderrData.endsWith("copilot\nmock-session-copilot\n"));
+    assert.ok(stderrData.endsWith("[agent session]\n0\ncopilot\nmock-session-copilot\n"));
   });
 
   it("first agent exits with non-zero code, second agent succeeds", async () => {
@@ -183,7 +183,7 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(!stderrData.includes("fail output"));
     assert.ok(!stderrData.includes("fail stderr"));
     assert.ok(!stderrData.includes("[claude] error:"));
-    assert.ok(stderrData.endsWith("copilot\nmock-session-copilot\n"));
+    assert.ok(stderrData.endsWith("[agent session]\n0\ncopilot\nmock-session-copilot\n"));
   });
 
   it("all agents fail session creation", async () => {
@@ -200,7 +200,7 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(!stderrData.includes("[claude] error:"));
     assert.ok(stderrData.includes("[copilot] error:"));
     assert.ok(stderrData.includes("session creation failed: session failed"));
-    assert.ok(stderrData.endsWith("copilot\n"));
+    assert.ok(stderrData.endsWith("[agent session]\n202\ncopilot\n"));
   });
 
   it("all agents fail provider send", async () => {
@@ -236,7 +236,7 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(stderrData.includes("[copilot] stderr:\nerr 2"));
     assert.ok(stderrData.includes("[copilot] error:"));
     assert.ok(stderrData.includes("timed out after"));
-    assert.ok(stderrData.endsWith("copilot\nmock-session-copilot\n"));
+    assert.ok(stderrData.endsWith("[agent session]\n203\ncopilot\nmock-session-copilot\n"));
   });
 
   it("unknown provider type prints error and exits with provider error code", async () => {
@@ -257,7 +257,7 @@ describe("multi-agent fallback E2E", () => {
 
     assert.strictEqual(exitCode, EXIT_OK);
     assert.ok(stdoutData.includes("from opencode"));
-    assert.ok(stderrData.endsWith("opencode\nses_mock\n"));
+    assert.ok(stderrData.endsWith("[agent session]\n0\nopencode\nses_mock\n"));
   });
 
   it("case-insensitive regex matching", async () => {
@@ -527,7 +527,7 @@ describe("multi-agent fallback E2E", () => {
     assert.strictEqual(copilotCalled, true);
     assert.ok(!stderrData.includes("quota exceeded: /hit your usage limit/i matched"));
     assert.ok(stdoutData.includes("all fine"));
-    assert.ok(stderrData.endsWith("copilot\ncopilot-session\n"));
+    assert.ok(stderrData.endsWith("[agent session]\n0\ncopilot\ncopilot-session\n"));
   });
 
   it("final stderr contains only last successful agent without debug", async () => {
@@ -550,7 +550,7 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(stderrData.includes("[cursor] stderr:\ncursor-thinking"));
     assert.ok(!stderrData.includes("codex-stderr-content"));
     assert.ok(!stderrData.includes("[codex] stderr:"));
-    assert.ok(stderrData.endsWith("cursor\nmock-session-cursor\n"));
+    assert.ok(stderrData.endsWith("[agent session]\n0\ncursor\nmock-session-cursor\n"));
   });
 
   it("debug logs codex stdout/stderr immediately on non-zero exit before fallback", async () => {

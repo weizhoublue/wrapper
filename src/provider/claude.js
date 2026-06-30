@@ -185,7 +185,7 @@ async function send(session, prompt) {
   session.events.length = 0;
   const prevLen = 0;
 
-  log.debug("claude provider: sending prompt=%s", prompt.slice(0, 80));
+  log.debug("claude provider: command=%s args=%j sending prompt=%s", session.cmd, session.args, prompt.slice(0, 80));
 
   session.input.push({
     type: "user",

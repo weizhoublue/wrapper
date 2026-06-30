@@ -183,7 +183,10 @@ async function send(session, prompt) {
           ? Math.max(0, session.deadline - Date.now())
           : remaining;
         const wait = Math.min(remaining, maxWait);
-        log.debug("codex: min-wait elapsed=%d remaining=%d wait=%d", elapsed, remaining, wait);
+        log.debug("codex: min-wait elapsed=%ss remaining=%ss wait=%ss",
+          (elapsed / 1000).toFixed(2),
+          (remaining / 1000).toFixed(2),
+          (wait / 1000).toFixed(2));
         setTimeout(finish, wait);
       } else {
         finish();

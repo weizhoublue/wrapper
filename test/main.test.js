@@ -49,6 +49,11 @@ describe("parseArgs", () => {
     assert.strictEqual(opts.agents[0].commandName, "my-claude");
   });
 
+  it("defaults retry to 2", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi"]);
+    assert.strictEqual(opts.retry, 2);
+  });
+
   it("parses all flags", () => {
     const opts = parseArgs(["node", "main.js",
       "-p", "test", "-t", "claude", "-c", "cc", "-d",
@@ -369,10 +374,13 @@ describe("buildStderrOutput", () => {
       commandName: "claude",
       stdout: "ignored",
       stderr: "thinking text",
-    });
+    }, 0);
     const lines = result.split("\n");
     assert.strictEqual(lines[lines.length - 1], "sid-1");
     assert.strictEqual(lines[lines.length - 2], "claude");
+    assert.strictEqual(lines[lines.length - 3], "0");
+    assert.strictEqual(lines[lines.length - 4], "[agent session]");
+    assert.strictEqual(lines[lines.length - 5], "");
     assert.ok(result.includes("[claude] stderr:\nthinking text"));
     assert.ok(!result.includes("[claude] stdout:"));
     assert.ok(!result.includes("[claude] error:"));
@@ -384,12 +392,12 @@ describe("buildStderrOutput", () => {
       stdout: "Hello.",
       stderr: "Reading additional input from stdin...",
       wrapperError: "non-zero exit code 1",
-    });
+    }, 1);
     assert.ok(result.includes("[codex] stderr:\nReading additional input from stdin..."));
     assert.ok(result.includes("[codex] error:\nnon-zero exit code 1"));
     assert.ok(!result.includes("[codex] stdout:"));
     assert.ok(!result.includes("Hello."));
-    assert.strictEqual(result.split("\n").slice(-2).join("\n"), "codex\nsid-2");
+    assert.strictEqual(result.split("\n").slice(-5).join("\n"), "\n[agent session]\n1\ncodex\nsid-2");
   });
 
   it("empty stderr: labels present without content lines", () => {
@@ -397,17 +405,17 @@ describe("buildStderrOutput", () => {
       commandName: "claude",
       stdout: "",
       stderr: "",
-    });
+    }, 0);
     assert.ok(result.includes("[claude] stderr:"));
     assert.ok(!result.includes("[claude] error:"));
-    assert.strictEqual(result.split("\n").slice(-2).join("\n"), "claude\nsid-3");
+    assert.strictEqual(result.split("\n").slice(-5).join("\n"), "\n[agent session]\n0\nclaude\nsid-3");
   });
 
   it("does not include other agents (single result only)", () => {
     const result = buildStderrOutput("codex", "sid-4", {
       commandName: "codex",
       stderr: "cdx-err",
-    });
+    }, 0);
     assert.ok(!result.includes("[copilot]"));
     assert.ok(result.includes("cdx-err"));
   });

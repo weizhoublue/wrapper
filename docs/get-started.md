@@ -53,7 +53,7 @@ node src/main.js -h
 | `-d, --debug` | 否 | 关 | 开启日志（所有级别输出到 stderr） |
 | `-e, --reg` | 否 | 空 | 正则匹配模式，不匹配则重试 |
 | `-x, --exclude` | 否 | 空 | 排除正则（仅匹配 stdout），匹配则立即宣告当前 agent 失败且不再重试 |
-| `-r, --retry` | 否 | 3 | 最大重试次数（适用于调用的每一个 Agent） |
+| `-r, --retry` | 否 | 2 | 最大重试次数（适用于调用的每一个 Agent） |
 | `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 可用） |
 | `-o, --timeout` | 否 | 3600（1 小时） | 单次 attempt 超时秒数；`0` 表示不限时 |
 | `-h, --help` | 否 | - | 输出中文帮助信息 |
@@ -63,7 +63,7 @@ node src/main.js -h
 | 输出 | 内容 |
 |------|------|
 | stdout | 最终成功（或最后一个失败的）Agent 的标准输出回答文本（去首尾空行、压缩连续空行） |
-| stderr | 最后一个 agent 的 `[agent] stderr:`（失败时含 `[agent] error:`）；倒数第二行为命令名，最后一行为 Session ID。多 agent fallback 时中间失败 agent 的输出仅在 `-d` 调试日志中可见 |
+| stderr | 最后一个 agent 的 `[agent] stderr:`（失败时含 `[agent] error:`）；倒数第五行为空行，倒数第四行为 `[agent session]`，倒数第三行为退出码，倒数第二行为命令名，最后一行为 Session ID。多 agent fallback 时中间失败 agent 的输出仅在 `-d` 调试日志中可见 |
 | exit code | 0 = 成功，200 = 正则不匹配，201 = 空输出，202 = 异常，203 = 超时，204 = 命令未找到，205 = 排除正则匹配 |
 
 ## 使用例子
