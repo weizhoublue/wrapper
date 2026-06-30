@@ -54,7 +54,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
                                   当前支持 codex copilot gemini
                                   还不支持 claude cursor （不知道长什么样） 
                                   这些无法检测  agy（无任何提示）   opencode（卡住不退出）
-    -r, --retry <次数>       每个 agent 最大重试次数 (默认: 3)
+    -r, --retry <次数>       每个 agent 最大重试次数 ，每次重试都使用前一次的会话来继续(默认: 2)
                                 如果多次指定 -t，每个 agent 有独立的重试次数
                                 如果不满足 -e 选项、-o 选项、 或者命令返回码非0、或者返回空的标准输出，则会重试运行
                                 -x 选项匹配时，直接不重试
@@ -220,7 +220,7 @@ function parseArgs(argv) {
       debug:     { type: "boolean", short: "d", default: false },
       reg:       { type: "string", short: "e" },
       exclude:   { type: "string", short: "x" },
-      retry:     { type: "string", short: "r", default: "3" },
+      retry:     { type: "string", short: "r", default: "2" },
       resume:    { type: "string", short: "s" },
       timeout:   { type: "string", short: "o", default: String(DEFAULT_TIMEOUT) },
       help:      { type: "boolean", short: "h", default: false },
@@ -245,7 +245,7 @@ function parseArgs(argv) {
     reg: values.reg || "",
     exclude: values.exclude || "",
     quota: quotaExplicit !== null ? quotaExplicit : true,
-    retry: Number.isNaN(retry) ? 3 : retry,
+    retry: Number.isNaN(retry) ? 2 : retry,
     resume,
     timeout: Number.isNaN(timeout) ? DEFAULT_TIMEOUT : timeout,
     agents,
@@ -411,6 +411,7 @@ async function main() {
       const maxAttempts = Math.max(1, opts.retry);
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         log.setContext({ agentName: agent.commandName, attempt: attempt + 1, maxAttempts });
+        log.debug("agent %s attempt session %d/%d command=%s", agent.commandName, attempt + 1, maxAttempts, agent.command);
         log.info("agent %s attempt session %d/%d session=%s", agent.commandName, attempt + 1, maxAttempts, session.sessionId || "(pending)");
 
         if (opts.timeout > 0 && session.deadline !== undefined) {
@@ -457,6 +458,13 @@ async function main() {
               wrapperError: timeoutReasonBrief(opts.timeout),
             });
             agentDone = true;
+          } else {
+            const continueSessionId = session.sessionId || lastResult.sessionId || "";
+            if (continueSessionId) {
+              log.debug("retry: continuing session %s", continueSessionId);
+            } else {
+              log.debug("retry: no session id yet, starting fresh");
+            }
           }
           continue;
         }
@@ -523,6 +531,12 @@ async function main() {
         }
 
         logAttemptOutput(agent.commandName, attempt + 1, lastResult.stdout, lastResult.stderr);
+        const continueSessionId = session.sessionId || lastResult.sessionId || "";
+        if (continueSessionId) {
+          log.debug("retry: continuing session %s", continueSessionId);
+        } else {
+          log.debug("retry: no session id yet, starting fresh");
+        }
         log.error("agent %s attempt session %d: retry needed — %s", agent.commandName, attempt + 1, retryReason(lastResult.stdout, regex));
       }
 

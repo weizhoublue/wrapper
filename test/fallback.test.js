@@ -573,12 +573,55 @@ describe("multi-agent fallback E2E", () => {
       stderrData.includes("agent codex attempt session 1 stderr:\nReading additional input from stdin..."),
       "should dump codex stderr before fallback",
     );
-    assert.ok(stderrData.includes("[codex][1/3]"), "should include context prefix");
+    assert.ok(stderrData.includes("[codex][1/2]"), "should include context prefix");
     assert.ok(
       stderrData.indexOf("Reading additional input from stdin...") < stderrData.indexOf("trying agent 2/2"),
       "codex stderr dump should precede cursor attempt",
     );
-    assert.ok(stderrData.includes("[codex][1/3]") && stderrData.includes("non-zero exit code 1"));
+    assert.ok(stderrData.includes("[codex][1/2]") && stderrData.includes("non-zero exit code 1"));
+  });
+
+  it("logs command on each retry attempt in debug mode", async () => {
+    let attempts = 0;
+    mockProviders.claude.sendMock = () => {
+      attempts++;
+      return {
+        stdout: "Hi",
+        stderr: "",
+        sessionId: "claude-session",
+        exitCode: 0,
+      };
+    };
+
+    await runMain(["-t", "claude", "-p", "hello", "-e", "bad", "-r", "2", "-d"]);
+
+    assert.strictEqual(attempts, 2);
+    assert.ok(
+      stderrData.includes("[claude][1/2] agent claude attempt session 1/2 command=claude"),
+      "attempt 1 should log command",
+    );
+    assert.ok(
+      stderrData.includes("[claude][2/2] agent claude attempt session 2/2 command=claude"),
+      "attempt 2 should log command",
+    );
+  });
+
+  it("logs retry continuing session in debug mode when session id is known", async () => {
+    let attempts = 0;
+    mockProviders.claude.sendMock = (session) => {
+      attempts++;
+      session.sessionId = session.sessionId || "mock-session-claude";
+      if (attempts === 1) {
+        return { stdout: "bad", stderr: "", sessionId: "mock-session-claude", exitCode: 0 };
+      }
+      return { stdout: "good match", stderr: "", sessionId: "mock-session-claude", exitCode: 0 };
+    };
+
+    await runMain(["-t", "claude", "-p", "hello", "-e", "good", "-r", "2", "-d"]);
+
+    assert.strictEqual(attempts, 2);
+    assert.strictEqual(exitCode, EXIT_OK);
+    assert.ok(stderrData.includes("retry: continuing session mock-session-claude"));
   });
 
   it("passes through exit code when --no-quota", async () => {
