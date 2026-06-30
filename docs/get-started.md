@@ -63,7 +63,7 @@ node src/main.js -h
 | 输出 | 内容 |
 |------|------|
 | stdout | 最终成功（或最后一个失败的）Agent 的标准输出回答文本（去首尾空行、压缩连续空行） |
-| stderr | 每个 agent 固定输出 `[agent] stdout:`、`[agent] stderr:`（仅 agent 原始输出）；失败时另附 `[agent] error:`（wrapper 判定原因）。倒数第二行为最终 Agent 命令名，最后一行为 Session ID |
+| stderr | 最后一个 agent 的 `[agent] stderr:`（失败时含 `[agent] error:`）；倒数第二行为命令名，最后一行为 Session ID。多 agent fallback 时中间失败 agent 的输出仅在 `-d` 调试日志中可见 |
 | exit code | 0 = 成功，200 = 正则不匹配，201 = 空输出，202 = 异常，203 = 超时，204 = 命令未找到，205 = 排除正则匹配 |
 
 ## 使用例子

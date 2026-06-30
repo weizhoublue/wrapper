@@ -364,90 +364,51 @@ describe("quotaReasonBrief", () => {
 });
 
 describe("buildStderrOutput", () => {
-  it("single agent output with agentCommandName and sessionId", () => {
-    const result = buildStderrOutput("claude", "sid-1", [
-      { commandName: "claude", stdout: "", stderr: "some error" },
-    ]);
-    assert.ok(result.endsWith("sid-1"));
+  it("success: stderr block and trailing metadata, no stdout or error", () => {
+    const result = buildStderrOutput("claude", "sid-1", {
+      commandName: "claude",
+      stdout: "ignored",
+      stderr: "thinking text",
+    });
     const lines = result.split("\n");
     assert.strictEqual(lines[lines.length - 1], "sid-1");
     assert.strictEqual(lines[lines.length - 2], "claude");
-  });
-
-  it("multi agent output aggregates all results with labels", () => {
-    const result = buildStderrOutput("codex", "sid-2", [
-      { commandName: "copilot", stdout: "cop-out", stderr: "cop-err" },
-      { commandName: "codex", stdout: "", stderr: "cdx-err" },
-    ]);
-    const lines = result.split("\n");
-    // 最后两行
-    assert.strictEqual(lines[lines.length - 1], "sid-2");
-    assert.strictEqual(lines[lines.length - 2], "codex");
-    // 包含分隔标记
-    assert.ok(result.includes("[copilot] stderr:"));
-    assert.ok(result.includes("cop-err"));
-    assert.ok(result.includes("[copilot] stdout:"));
-    assert.ok(result.includes("cop-out"));
-    assert.ok(result.includes("[codex] stderr:"));
-    assert.ok(result.includes("cdx-err"));
-  });
-
-  it("always labels stdout and stderr before agent name", () => {
-    const result = buildStderrOutput("claude", "sid-3", [
-      { commandName: "claude", stdout: "", stderr: "" },
-    ]);
-    const lines = result.split("\n");
-    assert.strictEqual(lines[lines.length - 1], "sid-3");
-    assert.strictEqual(lines[lines.length - 2], "claude");
-    assert.ok(result.includes("[claude] stdout:"));
-    assert.ok(result.includes("[claude] stderr:"));
+    assert.ok(result.includes("[claude] stderr:\nthinking text"));
+    assert.ok(!result.includes("[claude] stdout:"));
     assert.ok(!result.includes("[claude] error:"));
   });
 
-  it("orders stdout, stderr, then wrapper error", () => {
-    const result = buildStderrOutput("cursor", "sid-5", [
-      {
-        commandName: "cursor",
-        stdout: "Hello!",
-        stderr: "agent stderr line",
-        wrapperError: "all 3 attempts exhausted: regex /bad/ not matched",
-      },
-    ]);
-    const stdoutIdx = result.indexOf("[cursor] stdout:");
-    const stderrIdx = result.indexOf("[cursor] stderr:");
-    const errorIdx = result.indexOf("[cursor] error:");
-    assert.ok(stdoutIdx < stderrIdx);
-    assert.ok(stderrIdx < errorIdx);
-    assert.ok(result.includes("Hello!"));
-    assert.ok(result.includes("agent stderr line"));
-    assert.ok(result.includes("all 3 attempts exhausted: regex /bad/ not matched"));
-    assert.ok(!result.includes("stdout: Hello!"));
-  });
-
-  it("includes wrapper failure reason in error section only", () => {
-    const result = buildStderrOutput("codex", "sid-4", [
-      {
-        commandName: "codex",
-        stdout: "Hello.",
-        stderr: "Reading additional input from stdin...",
-        wrapperError: "exclude regex /hello/ matched",
-      },
-    ]);
-    assert.ok(result.includes("[codex] stdout:\nHello."));
+  it("failure: stderr, error, and trailing metadata", () => {
+    const result = buildStderrOutput("codex", "sid-2", {
+      commandName: "codex",
+      stdout: "Hello.",
+      stderr: "Reading additional input from stdin...",
+      wrapperError: "non-zero exit code 1",
+    });
     assert.ok(result.includes("[codex] stderr:\nReading additional input from stdin..."));
-    assert.ok(result.includes("[codex] error:\nexclude regex /hello/ matched"));
+    assert.ok(result.includes("[codex] error:\nnon-zero exit code 1"));
+    assert.ok(!result.includes("[codex] stdout:"));
+    assert.ok(!result.includes("Hello."));
+    assert.strictEqual(result.split("\n").slice(-2).join("\n"), "codex\nsid-2");
   });
 
-  it("includes quota exceeded wrapper error in error section", () => {
-    const result = buildStderrOutput("codex", "sid-q", [
-      {
-        commandName: "codex",
-        stdout: "",
-        stderr: "You've hit your usage limit",
-        wrapperError: "quota exceeded: /hit your usage limit/i matched",
-      },
-    ]);
-    assert.ok(result.includes("[codex] stderr:\nYou've hit your usage limit"));
-    assert.ok(result.includes("[codex] error:\nquota exceeded: /hit your usage limit/i matched"));
+  it("empty stderr: labels present without content lines", () => {
+    const result = buildStderrOutput("claude", "sid-3", {
+      commandName: "claude",
+      stdout: "",
+      stderr: "",
+    });
+    assert.ok(result.includes("[claude] stderr:"));
+    assert.ok(!result.includes("[claude] error:"));
+    assert.strictEqual(result.split("\n").slice(-2).join("\n"), "claude\nsid-3");
+  });
+
+  it("does not include other agents (single result only)", () => {
+    const result = buildStderrOutput("codex", "sid-4", {
+      commandName: "codex",
+      stderr: "cdx-err",
+    });
+    assert.ok(!result.includes("[copilot]"));
+    assert.ok(result.includes("cdx-err"));
   });
 });

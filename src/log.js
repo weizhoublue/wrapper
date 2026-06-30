@@ -2,6 +2,7 @@ const fs = require("fs");
 const util = require("util");
 
 let debugEnabled = false;
+let context = { agentName: null, attempt: null, maxAttempts: null };
 
 function timestamp() {
   const d = new Date();
@@ -10,9 +11,21 @@ function timestamp() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${padMs(d.getMilliseconds())}`;
 }
 
+function sessionLabel() {
+  if (context.attempt != null && context.maxAttempts != null) {
+    return `${context.attempt}/${context.maxAttempts}`;
+  }
+  return "-";
+}
+
 function write(level, format, ...args) {
   const msg = util.format(format, ...args);
-  fs.writeSync(process.stderr.fd, `[wrapper][${level}][${timestamp()}] ${msg}\n`);
+  let line = `[wrapper][${level}][${timestamp()}]`;
+  if (context.agentName) {
+    line += `[${context.agentName}][${sessionLabel()}]`;
+  }
+  line += ` ${msg}\n`;
+  fs.writeSync(process.stderr.fd, line);
 }
 
 function info(format, ...args) {
@@ -30,4 +43,12 @@ function debug(format, ...args) {
 function setDebug(v) { debugEnabled = v; }
 function isDebug() { return debugEnabled; }
 
-module.exports = { info, error, debug, setDebug, isDebug };
+function setContext({ agentName, attempt, maxAttempts }) {
+  context = { agentName: agentName ?? null, attempt: attempt ?? null, maxAttempts: maxAttempts ?? null };
+}
+
+function clearContext() {
+  context = { agentName: null, attempt: null, maxAttempts: null };
+}
+
+module.exports = { info, error, debug, setDebug, isDebug, setContext, clearContext };

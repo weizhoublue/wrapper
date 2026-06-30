@@ -63,4 +63,33 @@ describe("log", () => {
     log.setDebug(true);
     assert.strictEqual(log.isDebug(), true);
   });
+
+  it("prefix includes agent and session when context set", () => {
+    log.setDebug(true);
+    log.setContext({ agentName: "codex", attempt: 1, maxAttempts: 3 });
+    const output = captureLog(() => log.debug("spawn"));
+    assert.match(output, /\[wrapper\]\[debug\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\]\[codex\]\[1\/3\] spawn\n/);
+  });
+
+  it("prefix uses dash session when attempt not set", () => {
+    log.setDebug(true);
+    log.setContext({ agentName: "codex" });
+    const output = captureLog(() => log.info("trying"));
+    assert.match(output, /\[wrapper\]\[info\].*\[codex\]\[-\] trying\n/);
+  });
+
+  it("prefix omits agent bracket when no context", () => {
+    log.setDebug(true);
+    log.clearContext();
+    const output = captureLog(() => log.info("wrapper starting"));
+    assert.match(output, /\[wrapper\]\[info\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] wrapper starting\n/);
+    assert.doesNotMatch(output, /\[codex\]/);
+  });
+
+  it("error level gets context prefix", () => {
+    log.setDebug(true);
+    log.setContext({ agentName: "codex", attempt: 2, maxAttempts: 3 });
+    const output = captureLog(() => log.error("non-zero exit code 1"));
+    assert.match(output, /\[wrapper\]\[error\].*\[codex\]\[2\/3\] non-zero exit code 1\n/);
+  });
 });
