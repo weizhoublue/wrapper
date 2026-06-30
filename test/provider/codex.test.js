@@ -1,7 +1,60 @@
+const childProcess = require("child_process");
+const originalSpawn = childProcess.spawn;
+let mockSpawnFn = null;
+childProcess.spawn = (...args) => {
+  if (mockSpawnFn) return mockSpawnFn(...args);
+  return originalSpawn(...args);
+};
+
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
+const { Readable } = require("stream");
 
-const { extractText, extractThinking, extractSessionId, splitCommand, ensureFlags, insertResumeAfterExec } = require("../../src/provider/codex");
+const {
+  extractText,
+  extractThinking,
+  extractSessionId,
+  splitCommand,
+  ensureFlags,
+  insertResumeAfterExec,
+  createSession,
+  send,
+  closeSession,
+} = require("../../src/provider/codex");
+
+function makeMockCodexChild(lines, exitCode = 0) {
+  const EventEmitter = require("events");
+  const child = new EventEmitter();
+  const stdoutStream = new Readable({ read() {} });
+  child.stdout = stdoutStream;
+  child.stderr = new EventEmitter();
+  child.kill = () => {};
+  process.nextTick(() => {
+    for (const line of lines) {
+      stdoutStream.push(line + "\n");
+    }
+    stdoutStream.push(null);
+    setImmediate(() => child.emit("close", exitCode));
+  });
+  return child;
+}
+
+function resumeIndex(args) {
+  return args.indexOf("resume");
+}
+
+async function sendWithFastMinWait(session, prompt) {
+  const origSetTimeout = global.setTimeout;
+  global.setTimeout = (fn, ms, ...rest) => {
+    if (ms >= 1000) return origSetTimeout(fn, 0, ...rest);
+    return origSetTimeout(fn, ms, ...rest);
+  };
+  try {
+    return await send(session, prompt);
+  } finally {
+    global.setTimeout = origSetTimeout;
+  }
+}
 
 describe("Codex provider - extractText", () => {
   it("extracts text from agent_message items", () => {
@@ -107,5 +160,106 @@ describe("Codex provider - insertResumeAfterExec", () => {
   it("returns args unchanged when exec subcommand is missing", () => {
     const noExec = ["--json", "--skip-git-repo-check"];
     assert.deepStrictEqual(insertResumeAfterExec(noExec, "thread-abc-123"), noExec);
+  });
+});
+
+describe("Codex provider - send retry session continuity", () => {
+  it("createSession initializes sessionId from resume option", async () => {
+    const session = await createSession({
+      command: "node",
+      timeout: 10,
+      resume: "user-session-id",
+    });
+    assert.strictEqual(session.sessionId, "user-session-id");
+    await closeSession(session);
+  });
+
+  it("second send injects resume after first send returns thread_id", async () => {
+    const session = await createSession({ command: "node", timeout: 10 });
+    const threadId = "019e36ca-9b12-71c3-821a-cdaccf78db35";
+    const spawnedArgsList = [];
+
+    mockSpawnFn = (cmd, args) => {
+      spawnedArgsList.push([...args]);
+      const lines = [
+        JSON.stringify({ type: "thread.started", thread_id: threadId }),
+        JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "ok" } }),
+      ];
+      return makeMockCodexChild(lines);
+    };
+
+    try {
+      await sendWithFastMinWait(session, "prompt1");
+      await sendWithFastMinWait(session, "prompt2");
+
+      assert.strictEqual(spawnedArgsList.length, 2);
+      assert.strictEqual(session.sessionId, threadId);
+      assert.strictEqual(resumeIndex(spawnedArgsList[0]), -1, "first spawn must not resume");
+      assert.ok(resumeIndex(spawnedArgsList[1]) >= 0, "second spawn must include resume");
+      assert.strictEqual(spawnedArgsList[1][resumeIndex(spawnedArgsList[1]) + 1], threadId);
+      assert.ok(spawnedArgsList[1].includes("prompt2"));
+    } finally {
+      mockSpawnFn = null;
+      await closeSession(session);
+    }
+  });
+
+  it("does not duplicate resume when createSession already has resume from -s", async () => {
+    const resumeId = "existing-session-id";
+    const session = await createSession({ command: "node", timeout: 10, resume: resumeId });
+    let spawnedArgs = null;
+
+    mockSpawnFn = (cmd, args) => {
+      spawnedArgs = [...args];
+      return makeMockCodexChild([
+        JSON.stringify({ type: "thread.started", thread_id: resumeId }),
+      ]);
+    };
+
+    try {
+      await sendWithFastMinWait(session, "my prompt");
+      const resumeCount = spawnedArgs.filter((a) => a === "resume").length;
+      assert.strictEqual(resumeCount, 1);
+      assert.strictEqual(spawnedArgs[resumeIndex(spawnedArgs) + 1], resumeId);
+    } finally {
+      mockSpawnFn = null;
+      await closeSession(session);
+    }
+  });
+
+  it("preserves sessionId after timeout when thread.started was emitted", async () => {
+    const session = await createSession({ command: "node", timeout: 10 });
+    session.deadline = Date.now() + 50;
+    const threadId = "timeout-thread-id";
+    let spawnCount = 0;
+
+    mockSpawnFn = () => {
+      spawnCount++;
+      const EventEmitter = require("events");
+      const child = new EventEmitter();
+      const stdoutStream = new Readable({ read() {} });
+      child.stdout = stdoutStream;
+      child.stderr = new EventEmitter();
+      child.kill = () => {
+        process.nextTick(() => child.emit("close", null));
+      };
+      process.nextTick(() => {
+        stdoutStream.push(JSON.stringify({ type: "thread.started", thread_id: threadId }) + "\n");
+      });
+      return child;
+    };
+
+    try {
+      const first = await sendWithFastMinWait(session, "prompt1");
+      assert.strictEqual(first.timedOut, true);
+      assert.strictEqual(session.sessionId, threadId);
+
+      session.deadline = Date.now() + 60000;
+      await sendWithFastMinWait(session, "prompt2");
+      assert.strictEqual(spawnCount, 2);
+    } finally {
+      mockSpawnFn = null;
+      await closeSession(session);
+    }
   });
 });
