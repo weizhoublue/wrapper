@@ -47,7 +47,7 @@ wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 | `-x, --exclude` | 否 | 空 | 排除正则（仅匹配 stdout），匹配则立即宣告当前 agent 失败且不再重试 |
 | `-q, --quota` | 否 | 开 | 开启 agent 订阅额度耗尽检测 |
 | `-n, --no-quota` | 否 | — | 关闭 agent 订阅额度耗尽检测 |
-| `-r, --retry` | 否 | 3 | 最大重试次数（适用于调用的每一个 Agent） |
+| `-r, --retry` | 否 | 2 | 最大重试次数（适用于调用的每一个 Agent） |
 | `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 时可用） |
 | `-o, --timeout` | 否 | 3600（1 小时） | 单次 attempt 超时秒数；`0` 表示不限时 |
 | `-h, --help` | 否 | - | 显示中文帮助信息 |
@@ -140,7 +140,7 @@ Copilot / Gemini / Cursor 不使用 `--resume` CLI flag（该 flag 仅在交互�
 
 ### Session 复用
 
-重试在同一 Claude session 中进行，不创建新会话。Claude 知道上一轮对话上下文，可以给出不同答案。
+`-r` 重试在同一 agent 的同一 session 中进行，不跨 fallback agent 传递 session id。Claude/ACP 使用长连接复用 session；Codex/OpenCode/Agy 每次 spawn 新进程但在后续 attempt 注入 resume 参数（`exec resume`、`--session`、`--conversation`）。用户 `-s` 指定外部 session；未指定时 attempt 1 新建，attempt 2+ 自动 resume。agent 保留上一轮对话上下文，regex 不匹配重试时更可能给出不同答案。
 
 ### 超时
 
