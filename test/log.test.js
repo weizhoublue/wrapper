@@ -43,7 +43,7 @@ describe("log", () => {
   it("info writes when debug enabled", () => {
     log.setDebug(true);
     const output = captureLog(() => log.info("hello %s", "world"));
-    assert.match(output, /\[wrapper\]\[info\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] hello world\n/);
+    assert.match(output, /\[wrapper\]\[info\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] hello world\n/);
   });
 
   it("error writes when debug enabled", () => {
@@ -55,7 +55,7 @@ describe("log", () => {
   it("debug writes when enabled", () => {
     log.setDebug(true);
     const output = captureLog(() => log.debug("secret %s", "xyz"));
-    assert.match(output, /\[wrapper\]\[debug\].* secret xyz\n/);
+    assert.match(output, /\[wrapper\]\[debug\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] secret xyz\n/);
   });
 
   it("isDebug reflects state", () => {
