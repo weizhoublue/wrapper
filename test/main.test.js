@@ -276,7 +276,7 @@ describe("LimitMsg", () => {
       codex: { stdout: "", stderr: "You've hit your usage limit" },
       copilot: { stdout: "", stderr: "You have exceeded your monthly quota" },
       gemini: { stdout: "", stderr: "You have exhausted your capacity" },
-      opencode: { stdout: "", stderr: "free_tier_limit" },
+      opencode: { stdout: "", stderr: "Free usage exceeded" },
     };
     for (const [type, { stdout, stderr }] of Object.entries(samples)) {
       assert.ok(LimitMsg[type], `${type} should have a LimitMsg pattern`);
@@ -337,16 +337,16 @@ describe("isQuotaExceeded", () => {
     );
   });
 
-  it("matches opencode free_tier_limit in stderr", () => {
+  it("matches opencode free usage exceeded in stderr", () => {
     assert.strictEqual(
-      isQuotaExceeded("opencode", "", "free_tier_limit"),
+      isQuotaExceeded("opencode", "", "Free usage exceeded"),
       true,
     );
   });
 
-  it("matches opencode account_rate_limit in stdout", () => {
+  it("matches opencode subscription quota exceeded in stdout", () => {
     assert.strictEqual(
-      isQuotaExceeded("opencode", "account_rate_limit exceeded", ""),
+      isQuotaExceeded("opencode", "Subscription quota exceeded", ""),
       true,
     );
   });
