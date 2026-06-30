@@ -178,6 +178,8 @@ wrapper                                    codex exec 进程
 
 Codex 通过 `codex exec resume <session_id>` 子命令实现 session resume。`ensureFlags` 检测到 `resume` 参数后在 `exec` 之后注入 `["resume", resume]`，生成 `codex exec resume <id> --json ... <prompt>`。`codex exec resume` 与普通 `codex exec` 一样输出 NDJSON 事件流，`thread.started` 返回的 `thread_id` 即为原 session ID。
 
+**`-r` 自动 resume：** 未指定 `-s` 时，第一次 `send` 从 NDJSON `thread.started` 取得 `thread_id` 并写入 `session.sessionId`；regex/空输出/超时触发的重试在下次 spawn 时通过 `insertResumeAfterExec` 注入 `exec resume <thread_id>`，与 OpenCode 的 `--session` 重试模式一致。
+
 ### 关键实现细节
 
 - **stdin 关闭**：`stdio: ["ignore", "pipe", "pipe"]`，立即给 codex EOF

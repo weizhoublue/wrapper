@@ -44,7 +44,7 @@ describe("wrapper smoke", () => {
     assert.ok(result.stderr.includes("[wrapper][debug]"), "has debug log in stderr");
     assert.match(
       result.stderr,
-      /\[wrapper\]\[debug\].* finished, duration: \d+\.\d+s/,
+      /\[wrapper\]\[debug\].* finished, duration: \d+\.\d+ seconds/,
       "stderr should log the attempt duration"
     );
   });

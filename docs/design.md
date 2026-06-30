@@ -47,7 +47,7 @@ wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 | `-x, --exclude` | 否 | 空 | 排除正则（仅匹配 stdout），匹配则立即宣告当前 agent 失败且不再重试 |
 | `-q, --quota` | 否 | 开 | 开启 agent 订阅额度耗尽检测 |
 | `-n, --no-quota` | 否 | — | 关闭 agent 订阅额度耗尽检测 |
-| `-r, --retry` | 否 | 3 | 最大重试次数（适用于调用的每一个 Agent） |
+| `-r, --retry` | 否 | 2 | 最大重试次数（适用于调用的每一个 Agent） |
 | `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 时可用） |
 | `-o, --timeout` | 否 | 3600（1 小时） | 单次 attempt 超时秒数；`0` 表示不限时 |
 | `-h, --help` | 否 | - | 显示中文帮助信息 |
@@ -57,7 +57,7 @@ wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
 | 输出 | 成功 | 失败 |
 |------|------|------|
 | stdout | 最终成功（或最后一个失败的）Agent 的回答文本（去首尾空行、压缩连续空行） | 最后一个失败 Agent 的回答文本 |
-| stderr | 包含所有尝试过的 Agent 的标准输出/标准错误输出（以标签隔开），最后倒数第二行为成功（或最后一个失败的）Agent 的命令名，最后一行为最终会话 ID | 所有已尝试 Agent 的输出与错误汇总，倒数第二行为最后一个 Agent 的命令名，最后一行为会话 ID |
+| stderr | 最后一个 Agent 的 `[agent] stderr:`（失败时另附 `[agent] error:`），倒数第五行为空行，倒数第四行为 `[agent session]`，倒数第三行为退出码，倒数第二行为命令名，最后一行为会话 ID | 同上（最后一个失败 Agent） |
 | exit code | 最终成功 Agent 的退出码（通常为 0） | 最后一个 Agent 的退出码或重试耗尽退出码（200-206） |
 
 ### 退出码
@@ -136,11 +136,11 @@ Copilot / Gemini / Cursor 不使用 `--resume` CLI flag（该 flag 仅在交互�
 
 ### 失败原因输出
 
-结构化 stderr 固定顺序：`[agent] stdout:` → `[agent] stderr:`（仅 agent 原始输出）→ `[agent] error:`（wrapper 判定，仅失败时出现）。`error` 文案简洁，不重复 stdout 内容。
+结构化 stderr 固定顺序：`[agent] stderr:`（仅 agent 原始 stderr/thinking）→ `[agent] error:`（wrapper 判定，仅失败时出现）。不含 `[agent] stdout:`。多 Agent fallback 时，中间失败 Agent 的输出不在最终 stderr 中；使用 `-d` 可在调试日志中按 attempt 即时查看 stdout/stderr 全文。
 
 ### Session 复用
 
-重试在同一 Claude session 中进行，不创建新会话。Claude 知道上一轮对话上下文，可以给出不同答案。
+`-r` 重试在同一 agent 的同一 session 中进行，不跨 fallback agent 传递 session id。Claude/ACP 使用长连接复用 session；Codex/OpenCode/Agy 每次 spawn 新进程但在后续 attempt 注入 resume 参数（`exec resume`、`--session`、`--conversation`）。用户 `-s` 指定外部 session；未指定时 attempt 1 新建，attempt 2+ 自动 resume。agent 保留上一轮对话上下文，regex 不匹配重试时更可能给出不同答案。
 
 ### 超时
 
@@ -164,8 +164,9 @@ Copilot / Gemini / Cursor 不使用 `--resume` CLI flag（该 flag 仅在交互�
 
 ## 日志
 
-- `-d` 关闭：所有日志静默，stderr 只含思考过程 + session ID
-- `-d` 开启：`[wrapper][level][timestamp] message` 格式输出到 stderr
+- `-d` 关闭：wrapper 日志静默；stderr 只含最后一个 Agent 的 stderr 块 + 命令名 + session ID
+- `-d` 开启：`[wrapper][level][timestamp][agentName][attempt/maxAttempts] message` 格式；Agent 执行阶段 info/error/debug 均带 `[agentName][session]` 前缀（未开始 attempt 时 session 为 `-`）
+- 每次 attempt 失败时（`-d`），立即 dump 该次 stdout/stderr 全文到 debug 日志，再输出 error 原因行
 
 ## 文件结构
 

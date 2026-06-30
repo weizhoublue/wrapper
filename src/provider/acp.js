@@ -277,6 +277,8 @@ async function createSession({ command, timeout, resume, provider = "copilot" })
       client,
       sessionId,
       provider,
+      cmd,
+      args,
       childStderr: () => childStderr,
       childExitCode: () => childExitCode,
       childError: () => childError,
@@ -303,7 +305,7 @@ async function send(session, prompt) {
 
   session.client.notifications.length = 0;
 
-  log.debug("acp: sending prompt=%s", prompt.slice(0, 80));
+  log.debug("acp: command=%s args=%j sending prompt=%s", session.cmd, session.args, prompt.slice(0, 80));
 
   const timeoutMs = session.deadline === Infinity
     ? 0

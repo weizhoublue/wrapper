@@ -71,6 +71,15 @@ function ensureFlags(args, resume) {
   return out;
 }
 
+function insertResumeAfterExec(args, sessionId) {
+  if (!sessionId || args.includes("resume")) return args;
+  const execIdx = args.indexOf("exec");
+  if (execIdx < 0) return args;
+  const out = [...args];
+  out.splice(execIdx + 1, 0, "resume", sessionId);
+  return out;
+}
+
 async function createSession({ command, timeout, resume }) {
   const { command: cmd, args: baseArgs } = splitCommand(command);
 
@@ -85,6 +94,7 @@ async function createSession({ command, timeout, resume }) {
   return {
     cmd,
     baseArgs: safeArgs,
+    sessionId: resume || null,
     deadline: timeout > 0 ? Date.now() + timeout * 1000 : Infinity,
     closed: false,
   };
@@ -99,7 +109,7 @@ async function send(session, prompt) {
   if (session.closed) throw new Error("session closed");
 
   // Concat base args + prompt (prompt is the final positional argument)
-  const args = [...session.baseArgs, prompt];
+  const args = [...insertResumeAfterExec(session.baseArgs, session.sessionId), prompt];
 
   log.debug("codex: spawning %s %j", session.cmd, args);
 
@@ -118,7 +128,7 @@ async function send(session, prompt) {
     if (session.deadline !== Infinity) {
       const remaining = session.deadline - Date.now();
       if (remaining <= 0) {
-        resolve({ stdout: "", stderr: "", sessionId: null, exitCode: 1, timedOut: true });
+        resolve({ stdout: "", stderr: "", sessionId: session.sessionId, exitCode: 1, timedOut: true });
         return;
       }
       timer = setTimeout(() => {
@@ -144,16 +154,17 @@ async function send(session, prompt) {
 
       const stdout = extractText(events);
       const stderr = extractThinking(events) || childStderr.trim();
-      const sessionId = extractSessionId(events);
+      const extractedId = extractSessionId(events);
+      if (extractedId) session.sessionId = extractedId;
 
       const finish = () => {
         log.debug("codex: exitCode=%d sessionId=%s stdoutLen=%d stderrLen=%d timedOut=%s",
-          exitCode, sessionId, stdout.length, stderr.length, timedOut);
+          exitCode, session.sessionId, stdout.length, stderr.length, timedOut);
 
         resolve({
           stdout,
           stderr: stderr || undefined,
-          sessionId,
+          sessionId: session.sessionId,
           exitCode: timedOut ? 1 : (exitCode || 0),
           timedOut,
         });
@@ -172,7 +183,10 @@ async function send(session, prompt) {
           ? Math.max(0, session.deadline - Date.now())
           : remaining;
         const wait = Math.min(remaining, maxWait);
-        log.debug("codex: min-wait elapsed=%d remaining=%d wait=%d", elapsed, remaining, wait);
+        log.debug("codex: min-wait elapsed=%ss remaining=%ss wait=%ss",
+          (elapsed / 1000).toFixed(2),
+          (remaining / 1000).toFixed(2),
+          (wait / 1000).toFixed(2));
         setTimeout(finish, wait);
       } else {
         finish();
@@ -201,4 +215,4 @@ async function run(opts) {
   }
 }
 
-module.exports = { createSession, send, closeSession, run, extractText, extractThinking, extractSessionId, splitCommand, ensureFlags };
+module.exports = { createSession, send, closeSession, run, extractText, extractThinking, extractSessionId, splitCommand, ensureFlags, insertResumeAfterExec };

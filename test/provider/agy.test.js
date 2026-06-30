@@ -19,8 +19,31 @@ const {
   closeSession,
   run,
   ensureFlags,
-  extractSessionIdFromLog
+  extractSessionIdFromLog,
+  insertConversationBeforePrint,
 } = require("../../src/provider/agy");
+
+function makeMockChild(logPath, logContent) {
+  const EventEmitter = require("events");
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  if (logContent) {
+    fs.writeFileSync(logPath, logContent);
+  }
+  process.nextTick(() => {
+    child.emit("close", 0);
+  });
+  return child;
+}
+
+function conversationIndex(args) {
+  return args.indexOf("--conversation");
+}
+
+function printIndex(args) {
+  return args.indexOf("--print");
+}
 
 describe("agy - ensureFlags", () => {
   it("injects log path and required flags", () => {
@@ -150,5 +173,75 @@ describe("agy - send", () => {
         fs.unlinkSync(session.logPath);
       }
     }
+  });
+
+  it("inserts --conversation before --print on retry within same session", async () => {
+    const session = await createSession({ command: "node", timeout: 10 });
+    const sessionId = "a0b1c2-d3e4-f5a6";
+    const spawnedArgsList = [];
+
+    mockSpawnFn = (cmd, args) => {
+      spawnedArgsList.push([...args]);
+      return makeMockChild(session.logPath, `Created conversation ${sessionId}`);
+    };
+
+    try {
+      await send(session, "prompt1");
+      await send(session, "prompt2");
+
+      assert.strictEqual(spawnedArgsList.length, 2);
+      const retryArgs = spawnedArgsList[1];
+      assert.ok(retryArgs.includes("prompt2"));
+      assert.ok(retryArgs.includes(sessionId));
+      assert.ok(conversationIndex(retryArgs) < printIndex(retryArgs),
+        "expected --conversation before --print, got: " + JSON.stringify(retryArgs));
+      assert.ok(!retryArgs.join(",").includes("--print,--conversation"),
+        "must not append --conversation after --print");
+    } finally {
+      mockSpawnFn = null;
+      if (fs.existsSync(session.logPath)) {
+        fs.unlinkSync(session.logPath);
+      }
+    }
+  });
+
+  it("does not duplicate --conversation when resume id is set at createSession", async () => {
+    const resumeId = "existing-session-id";
+    const session = await createSession({ command: "node", timeout: 10, resume: resumeId });
+    let spawnedArgs = null;
+
+    mockSpawnFn = (cmd, args) => {
+      spawnedArgs = [...args];
+      return makeMockChild(session.logPath, `Created conversation ${resumeId}`);
+    };
+
+    try {
+      await send(session, "my prompt");
+      const conversationCount = spawnedArgs.filter((a) => a === "--conversation").length;
+      assert.strictEqual(conversationCount, 1);
+      assert.ok(conversationIndex(spawnedArgs) < printIndex(spawnedArgs));
+      assert.strictEqual(spawnedArgs[conversationIndex(spawnedArgs) + 1], resumeId);
+    } finally {
+      mockSpawnFn = null;
+      if (fs.existsSync(session.logPath)) {
+        fs.unlinkSync(session.logPath);
+      }
+    }
+  });
+});
+
+describe("agy - insertConversationBeforePrint", () => {
+  it("inserts before --print flag", () => {
+    const base = ["--log-file", "/tmp/x.log", "--print"];
+    const result = insertConversationBeforePrint(base, "sess-123");
+    assert.deepStrictEqual(result, [
+      "--log-file", "/tmp/x.log", "--conversation", "sess-123", "--print",
+    ]);
+  });
+
+  it("returns copy unchanged when conversation already present", () => {
+    const base = ["--conversation", "existing", "--print"];
+    const result = insertConversationBeforePrint(base, "sess-123");
+    assert.deepStrictEqual(result, base);
   });
 });

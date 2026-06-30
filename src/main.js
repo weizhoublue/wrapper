@@ -54,7 +54,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
                                   当前支持 codex copilot gemini
                                   还不支持 claude cursor （不知道长什么样） 
                                   这些无法检测  agy（无任何提示）   opencode（卡住不退出）
-    -r, --retry <次数>       每个 agent 最大重试次数 (默认: 3)
+    -r, --retry <次数>       每个 agent 最大重试次数 ，每次重试都使用前一次的会话来继续(默认: 2)
                                 如果多次指定 -t，每个 agent 有独立的重试次数
                                 如果不满足 -e 选项、-o 选项、 或者命令返回码非0、或者返回空的标准输出，则会重试运行
                                 -x 选项匹配时，直接不重试
@@ -65,54 +65,59 @@ const HELP = `用法: wrapper -p <提示词> [选项]
 
 输出:
     stdout  = 最后一个 agent 的标准输出
-    stderr  = 所有 agent 的标准输出和错误输出 + 最终成功的 agent 名字 (倒数第二行) + 会话 ID (最后一行)
+    stderr  = 最后一个 agent 的标准错误输出（失败时含 [agent] error: 判定原因）
+              倒数第三行为退出码，倒数第二行为 agent 命令名，最后一行为会话 ID
+              多 agent fallback 时，中间失败 agent 的输出仅在 -d 调试日志中可见
     退出码   = 最后一个 agent 的退出码
 
-例子:
-    wrapper -t claude -c "claude-deepseek-flash" -p "say hi in one word"
 
-    wrapper -t claude -c "claude-deepseek-flash" -e "bingo|Bingo" -p "please say bingo in english"
+----------------------------- 例子 ----------------------------
 
-    wrapper -t claude -c "claude-deepseek-flash"  -p "tomorow will rain" 2>/tmp/sid
+claude:
+    wrapper -t claude -c "claude-deepseek-flash" -d -p "say hi in one word"
+
+    wrapper -t claude -c "claude-deepseek-flash" -d -e "bad" -p "what did I just say?"
+
+    wrapper -t claude -c "claude-deepseek-flash" -d  -p "tomorow will rain" 2>/tmp/sid
     session=$(tail -1 /tmp/sid)
-    wrapper -t claude -c "claude-deepseek-flash" -s \${session} -p "tell me all what I have said in this session"
+    wrapper -t claude -c "claude-deepseek-flash" -s \${session} -d  -p "tell me all what I have said in this session"
 
-多 agent fallback 例子:
+codex:
+    wrapper -t codex -d  -p "say hi in one word"
+    wrapper -t codex -c codex-cheap -d  -p "say hi in one word"
+
+    wrapper -t codex -d  -p "tomorrow will rain" 2>/tmp/sid
+    session=$(tail -1 /tmp/sid)
+    wrapper -t codex -s \${session} -d -p  "tell me all what I have said in this session ?"
+
+copilot:
+    wrapper -t copilot -d -p "say hi in one word"
+
+gemini:
+    wrapper -t gemini -d -p "say hi in one word"
+
+agy:
+   wrapper -t agy -d -p "say hi in one word"
+
+cursor:
+    wrapper -t cursor -d -p "say hi in one word"
+
+    wrapper -t cursor -d -p "tomorrow will rain" 2>/tmp/sid
+    session=$(tail -1 /tmp/sid)
+    wrapper -t cursor -s \${session} -d -p "tell me all what I have said in this session"
+
+opencode:
+    wrapper -t opencode -d -p "say hi in one word"
+    wrapper --type opencode -c "opencode-free"  -d -p "hi"
+
+    wrapper -t opencode -d -p "tomorrow will rain" 2>/tmp/sid
+    session=$(tail -1 /tmp/sid)
+    wrapper -t opencode -s \${session} -d -p "tell me all what I have said in this session"
+
+fallback:
     wrapper -t claude -c "claude-deepseek-flash" -t codex -t copilot -d -p  "say hi in one word" 2>/tmp/sid
     agentName=$( sed '$d' /tmp/sid | sed -n '$p' )
     session=$(tail -1 /tmp/sid)
-
-codex:
-    wrapper -t codex -p "say hi in one word"
-    wrapper -t codex -c codex-cheap -p "say hi in one word"
-
-    wrapper -t codex  -p "tomorrow will rain" 2>/tmp/sid
-    session=$(tail -1 /tmp/sid)
-    wrapper -t codex -s \${session} -p  "tell me all what I have said in this session ?"
-
-copilot:
-    wrapper -t copilot -p "say hi in one word"
-
-gemini:
-    wrapper -t gemini -p "say hi in one word"
-
-agy:
-   wrapper -t agy -p "say hi in one word"
-
-cursor:
-    wrapper -t cursor -p "say hi in one word"
-
-    wrapper -t cursor -p "tomorrow will rain" 2>/tmp/sid
-    session=$(tail -1 /tmp/sid)
-    wrapper -t cursor -s \${session} -p "tell me all what I have said in this session"
-
-opencode:
-    wrapper -t opencode -p "say hi in one word"
-    wrapper --type opencode -c "opencode --model=opencode-go/deepseek-v4-flash --variant=high --thinking=true"  -p "hi"
-
-    wrapper -t opencode -p "tomorrow will rain" 2>/tmp/sid
-    session=$(tail -1 /tmp/sid)
-    wrapper -t opencode -s \${session} -p "tell me all what I have said in this session"
 
 debug:
     wrapper -t claude -c "claude-deepseek-flash" -d -p "tomorow will rain" 2>/tmp/sid
@@ -215,7 +220,7 @@ function parseArgs(argv) {
       debug:     { type: "boolean", short: "d", default: false },
       reg:       { type: "string", short: "e" },
       exclude:   { type: "string", short: "x" },
-      retry:     { type: "string", short: "r", default: "3" },
+      retry:     { type: "string", short: "r", default: "2" },
       resume:    { type: "string", short: "s" },
       timeout:   { type: "string", short: "o", default: String(DEFAULT_TIMEOUT) },
       help:      { type: "boolean", short: "h", default: false },
@@ -240,7 +245,7 @@ function parseArgs(argv) {
     reg: values.reg || "",
     exclude: values.exclude || "",
     quota: quotaExplicit !== null ? quotaExplicit : true,
-    retry: Number.isNaN(retry) ? 3 : retry,
+    retry: Number.isNaN(retry) ? 2 : retry,
     resume,
     timeout: Number.isNaN(timeout) ? DEFAULT_TIMEOUT : timeout,
     agents,
@@ -257,20 +262,39 @@ function canRetry(stdout, regex) {
   return false;
 }
 
-function buildStderrOutput(agentCommandName, sessionId, agentResults) {
-  const parts = [];
+function resolveExitCode(result, regex) {
+  if (!result) return EXIT_PROVIDER_ERROR;
+  if (result.sessionCreationFailed) {
+    return result.commandNotFound ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR;
+  }
+  if (result.sendFailed) return EXIT_PROVIDER_ERROR;
+  if (result.timedOut) return EXIT_TIMEOUT;
+  if (result.quotaExceeded) return EXIT_QUOTA_EXCEEDED;
+  if (result.exitCode && result.exitCode !== 0) return result.exitCode;
+  if (result.excludeMatched) return EXIT_EXCLUDE_MATCH;
+  if (result.exhausted) {
+    return isOutputEmpty(result.stdout) ? EXIT_EMPTY_OUTPUT
+      : (regex ? EXIT_REGEX_MISMATCH : EXIT_OK);
+  }
+  return result.exitCode ?? EXIT_OK;
+}
 
-  for (const r of agentResults) {
-    parts.push(`[${r.commandName}] stdout:`);
-    if (r.stdout) parts.push(r.stdout);
-    parts.push(`[${r.commandName}] stderr:`);
-    if (r.stderr) parts.push(r.stderr);
-    if (r.wrapperError) {
-      parts.push(`[${r.commandName}] error:`);
-      parts.push(r.wrapperError);
-    }
+function buildStderrOutput(agentCommandName, sessionId, result, exitCode) {
+  const parts = [];
+  const name = result.commandName;
+
+  parts.push("");
+  parts.push(`[${name}] stderr:`);
+  if (result.stderr) parts.push(result.stderr);
+  if (result.wrapperError) {
+    parts.push("");
+    parts.push(`[${name}] error:`);
+    parts.push(result.wrapperError);
   }
 
+  parts.push("");
+  parts.push("[agent session]");
+  parts.push(String(exitCode));
   if (agentCommandName) parts.push(agentCommandName);
   if (sessionId) parts.push(sessionId);
   return parts.join("\n");
@@ -315,6 +339,11 @@ function excludeReasonBrief(regex) {
 
 function exhaustedReason(stdout, regex, maxAttempts) {
   return `all ${maxAttempts} attempts exhausted: ${retryReasonBrief(stdout, regex)}`;
+}
+
+function logAttemptOutput(agentName, attempt, stdout, stderr) {
+  log.debug("agent %s attempt session %d stdout:\n%s", agentName, attempt, stdout || "(empty)");
+  log.debug("agent %s attempt session %d stderr:\n%s", agentName, attempt, stderr || "(empty)");
 }
 
 async function main() {
@@ -363,6 +392,7 @@ async function main() {
     }
 
     log.info("trying agent %d/%d: %s (%s)", agentIdx + 1, opts.agents.length, agent.commandName, agent.type);
+    log.setContext({ agentName: agent.commandName });
 
     let session;
     try {
@@ -373,6 +403,7 @@ async function main() {
         isCustom: agent.isCustom || false,
       });
     } catch (err) {
+      logAttemptOutput(agent.commandName, 1, "", "");
       log.error("failed to create session for %s: %s", agent.commandName, err.message);
       allResults.push({
         commandName: agent.commandName,
@@ -389,8 +420,10 @@ async function main() {
       }
       // last agent — exit
       process.stdout.write("\n");
-      process.stderr.write(buildStderrOutput(agent.commandName, "", allResults) + "\n");
-      process.exit(err.message.startsWith("command not found") ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR);
+      const lastEntry = allResults[allResults.length - 1];
+      const exitCode = err.message.startsWith("command not found") ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR;
+      process.stderr.write(buildStderrOutput(agent.commandName, "", lastEntry, exitCode) + "\n");
+      process.exit(exitCode);
     }
 
     let lastResult = null;
@@ -400,6 +433,8 @@ async function main() {
     try {
       const maxAttempts = Math.max(1, opts.retry);
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        log.setContext({ agentName: agent.commandName, attempt: attempt + 1, maxAttempts });
+        log.debug("agent %s attempt session %d/%d command=%s", agent.commandName, attempt + 1, maxAttempts, agent.command);
         log.info("agent %s attempt session %d/%d session=%s", agent.commandName, attempt + 1, maxAttempts, session.sessionId || "(pending)");
 
         if (opts.timeout > 0 && session.deadline !== undefined) {
@@ -412,6 +447,7 @@ async function main() {
         } catch (err) {
           const duration = ((performance.now() - attemptStartTime) / 1000).toFixed(2);
           log.debug("agent %s attempt session %d failed, duration: %ss", agent.commandName, attempt + 1, duration);
+          logAttemptOutput(agent.commandName, attempt + 1, lastResult?.stdout, lastResult?.stderr);
           log.error("provider send failed for %s: %s", agent.commandName, err.message);
           allResults.push({
             commandName: agent.commandName,
@@ -433,9 +469,8 @@ async function main() {
           agent.commandName, attempt + 1, (lastResult.stderr || "").length);
 
         if (lastResult.timedOut) {
+          logAttemptOutput(agent.commandName, attempt + 1, lastResult.stdout, lastResult.stderr);
           log.error("agent %s attempt session %d: timed out after %ds", agent.commandName, attempt + 1, opts.timeout);
-          log.debug("attempt %d stdout:\n%s", attempt + 1, lastResult.stdout || "(empty)");
-          log.debug("attempt %d stderr:\n%s", attempt + 1, lastResult.stderr || "(empty)");
           if (attempt + 1 >= maxAttempts) {
             allResults.push({
               commandName: agent.commandName,
@@ -446,6 +481,13 @@ async function main() {
               wrapperError: timeoutReasonBrief(opts.timeout),
             });
             agentDone = true;
+          } else {
+            const continueSessionId = session.sessionId || lastResult.sessionId || "";
+            if (continueSessionId) {
+              log.debug("retry: continuing session %s", continueSessionId);
+            } else {
+              log.debug("retry: no session id yet, starting fresh");
+            }
           }
           continue;
         }
@@ -453,6 +495,7 @@ async function main() {
         if (lastResult.exitCode && lastResult.exitCode !== 0) {
           if (opts.quota && isQuotaExceeded(agent.type, lastResult.stdout, lastResult.stderr)) {
             const pattern = LimitMsg[agent.type];
+            logAttemptOutput(agent.commandName, attempt + 1, lastResult.stdout, lastResult.stderr);
             log.error("agent %s attempt session %d: quota exceeded — /%s/i matched",
               agent.commandName, attempt + 1, pattern);
             allResults.push({
@@ -468,6 +511,7 @@ async function main() {
             break;
           }
 
+          logAttemptOutput(agent.commandName, attempt + 1, lastResult.stdout, lastResult.stderr);
           log.error("agent %s attempt session %d: non-zero exit code %d", agent.commandName, attempt + 1, lastResult.exitCode);
           allResults.push({
             commandName: agent.commandName,
@@ -483,6 +527,7 @@ async function main() {
 
         if (excludeRegex && excludeRegex.test(lastResult.stdout)) {
           const reason = excludeReason(lastResult.stdout, excludeRegex);
+          logAttemptOutput(agent.commandName, attempt + 1, lastResult.stdout, lastResult.stderr);
           log.error("agent %s attempt session %d: excluded pattern matched — %s", agent.commandName, attempt + 1, reason);
           allResults.push({
             commandName: agent.commandName,
@@ -508,9 +553,14 @@ async function main() {
           break;
         }
 
+        logAttemptOutput(agent.commandName, attempt + 1, lastResult.stdout, lastResult.stderr);
+        const continueSessionId = session.sessionId || lastResult.sessionId || "";
+        if (continueSessionId) {
+          log.debug("retry: continuing session %s", continueSessionId);
+        } else {
+          log.debug("retry: no session id yet, starting fresh");
+        }
         log.error("agent %s attempt session %d: retry needed — %s", agent.commandName, attempt + 1, retryReason(lastResult.stdout, regex));
-        log.debug("attempt session %d stdout:\n%s", attempt + 1, lastResult.stdout || "(empty)");
-        log.debug("attempt session %d stderr:\n%s", attempt + 1, lastResult.stderr || "(empty)");
       }
 
       // retry exhausted but not marked agentDone
@@ -533,13 +583,17 @@ async function main() {
       const out = collapseBlankLines(lastResult.stdout);
       process.stdout.write(out);
       if (!out.endsWith("\n")) process.stdout.write("\n");
-      process.stderr.write(buildStderrOutput(agent.commandName, lastResult.sessionId || session.sessionId, allResults) + "\n");
-      process.exit(lastResult.exitCode || EXIT_OK);
+      const lastEntry = allResults[allResults.length - 1];
+      const exitCode = lastResult.exitCode || EXIT_OK;
+      process.stderr.write(buildStderrOutput(agent.commandName, lastResult.sessionId || session.sessionId, lastEntry, exitCode) + "\n");
+      process.exit(exitCode);
     }
 
     log.error("agent %s failed, %s", agent.commandName,
       agentIdx < opts.agents.length - 1 ? "falling back to next agent" : "no more agents");
   }
+
+  log.clearContext();
 
   // all agents failed
   const lastAgent = opts.agents[opts.agents.length - 1];
@@ -547,34 +601,9 @@ async function main() {
   const out = collapseBlankLines(lastAgentResult?.stdout || "");
   process.stdout.write(out);
   if (!out.endsWith("\n")) process.stdout.write("\n");
-  process.stderr.write(buildStderrOutput(lastAgent.commandName, lastAgentResult?.sessionId || "", allResults) + "\n");
-
-  if (lastAgentResult) {
-    if (lastAgentResult.sessionCreationFailed) {
-      process.exit(lastAgentResult.commandNotFound ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR);
-    }
-    if (lastAgentResult.sendFailed) {
-      process.exit(EXIT_PROVIDER_ERROR);
-    }
-    if (lastAgentResult.timedOut) {
-      process.exit(EXIT_TIMEOUT);
-    }
-    if (lastAgentResult.quotaExceeded) {
-      process.exit(EXIT_QUOTA_EXCEEDED);
-    }
-    if (lastAgentResult.exitCode && lastAgentResult.exitCode !== 0) {
-      process.exit(lastAgentResult.exitCode);
-    }
-    if (lastAgentResult.excludeMatched) {
-      process.exit(EXIT_EXCLUDE_MATCH);
-    }
-    if (lastAgentResult.exhausted) {
-      const exitCode = isOutputEmpty(lastAgentResult.stdout) ? EXIT_EMPTY_OUTPUT
-        : (regex ? EXIT_REGEX_MISMATCH : EXIT_OK);
-      process.exit(exitCode);
-    }
-  }
-  process.exit(EXIT_PROVIDER_ERROR);
+  const exitCode = resolveExitCode(lastAgentResult, regex);
+  process.stderr.write(buildStderrOutput(lastAgent.commandName, lastAgentResult?.sessionId || "", lastAgentResult, exitCode) + "\n");
+  process.exit(exitCode);
 }
 
 if (require.main === module) {

@@ -20,6 +20,23 @@ function which(cmd) {
 }
 
 const REQUIRED_FLAGS = ["--dangerously-skip-permissions"];
+const PRINT_MODE_FLAGS = ["--print", "-p", "--prompt", "-i", "--prompt-interactive"];
+
+function hasPrintMode(args) {
+  return PRINT_MODE_FLAGS.some((flag) => args.includes(flag));
+}
+
+function insertConversationBeforePrint(args, sessionId) {
+  if (!sessionId || args.includes("--conversation")) return [...args];
+  const out = [...args];
+  const printIdx = out.findIndex((a) => PRINT_MODE_FLAGS.includes(a));
+  if (printIdx >= 0) {
+    out.splice(printIdx, 0, "--conversation", sessionId);
+  } else {
+    out.push("--conversation", sessionId);
+  }
+  return out;
+}
 
 function ensureFlags(args, resume, logPath) {
   const out = [...args];
@@ -42,10 +59,7 @@ function ensureFlags(args, resume, logPath) {
   }
 
   // Inject print mode if no interactive or print mode is present
-  const hasPrintMode = out.includes("--print") || out.includes("-p") || 
-                       out.includes("--prompt") || out.includes("-i") || 
-                       out.includes("--prompt-interactive");
-  if (!hasPrintMode) {
+  if (!hasPrintMode(out)) {
     out.push("--print");
   }
 
@@ -92,10 +106,7 @@ async function createSession({ command, timeout, resume }) {
 async function send(session, prompt) {
   if (session.closed) throw new Error("session closed");
 
-  const args = [...session.baseArgs];
-  if (session.sessionId && !args.includes("--conversation")) {
-    args.push("--conversation", session.sessionId);
-  }
+  const args = insertConversationBeforePrint(session.baseArgs, session.sessionId);
   args.push(prompt);
   log.debug("agy: spawning %s %j", session.cmd, args);
 
@@ -188,5 +199,6 @@ module.exports = {
   closeSession,
   run,
   ensureFlags,
-  extractSessionIdFromLog
+  extractSessionIdFromLog,
+  insertConversationBeforePrint,
 };
