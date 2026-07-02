@@ -41,10 +41,10 @@ describe("wrapper smoke", () => {
 
   it("debug flag enables debug output", { skip: !hasClaude }, async () => {
     const result = await runCommu(["-p", "say no", "-d"]);
-    assert.ok(result.stderr.includes("[wrapper][debug]"), "has debug log in stderr");
+    assert.ok(result.stderr.includes("[wrapper]") && /\[wrapper\]\[\d{6}\]\[debug\]/.test(result.stderr), "has debug log in stderr");
     assert.match(
       result.stderr,
-      /\[wrapper\]\[debug\].* finished, duration: \d+\.\d+ seconds/,
+      /\[wrapper\]\[\d{6}\]\[debug\].* finished, duration: \d+\.\d+ seconds/,
       "stderr should log the attempt duration"
     );
   });

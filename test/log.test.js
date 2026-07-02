@@ -43,19 +43,19 @@ describe("log", () => {
   it("info writes when debug enabled", () => {
     log.setDebug(true);
     const output = captureLog(() => log.info("hello %s", "world"));
-    assert.match(output, /\[wrapper\]\[info\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] hello world\n/);
+    assert.match(output, /\[wrapper\]\[\d{6}\]\[info\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] hello world\n/);
   });
 
   it("error writes when debug enabled", () => {
     log.setDebug(true);
     const output = captureLog(() => log.error("fail %d", 500));
-    assert.match(output, /\[wrapper\]\[error\].* fail 500\n/);
+    assert.match(output, /\[wrapper\]\[\d{6}\]\[error\].* fail 500\n/);
   });
 
   it("debug writes when enabled", () => {
     log.setDebug(true);
     const output = captureLog(() => log.debug("secret %s", "xyz"));
-    assert.match(output, /\[wrapper\]\[debug\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] secret xyz\n/);
+    assert.match(output, /\[wrapper\]\[\d{6}\]\[debug\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] secret xyz\n/);
   });
 
   it("isDebug reflects state", () => {
@@ -68,21 +68,21 @@ describe("log", () => {
     log.setDebug(true);
     log.setContext({ agentName: "codex", attempt: 1, maxAttempts: 3 });
     const output = captureLog(() => log.debug("spawn"));
-    assert.match(output, /\[wrapper\]\[debug\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\]\[codex\]\[1\/3\] spawn\n/);
+    assert.match(output, /\[wrapper\]\[\d{6}\]\[debug\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\]\[codex\]\[1\/3\] spawn\n/);
   });
 
   it("prefix uses dash session when attempt not set", () => {
     log.setDebug(true);
     log.setContext({ agentName: "codex" });
     const output = captureLog(() => log.info("trying"));
-    assert.match(output, /\[wrapper\]\[info\].*\[codex\]\[-\] trying\n/);
+    assert.match(output, /\[wrapper\]\[\d{6}\]\[info\].*\[codex\]\[-\] trying\n/);
   });
 
   it("prefix omits agent bracket when no context", () => {
     log.setDebug(true);
     log.clearContext();
     const output = captureLog(() => log.info("wrapper starting"));
-    assert.match(output, /\[wrapper\]\[info\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] wrapper starting\n/);
+    assert.match(output, /\[wrapper\]\[\d{6}\]\[info\]\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\] wrapper starting\n/);
     assert.doesNotMatch(output, /\[codex\]/);
   });
 
@@ -90,6 +90,6 @@ describe("log", () => {
     log.setDebug(true);
     log.setContext({ agentName: "codex", attempt: 2, maxAttempts: 3 });
     const output = captureLog(() => log.error("non-zero exit code 1"));
-    assert.match(output, /\[wrapper\]\[error\].*\[codex\]\[2\/3\] non-zero exit code 1\n/);
+    assert.match(output, /\[wrapper\]\[\d{6}\]\[error\].*\[codex\]\[2\/3\] non-zero exit code 1\n/);
   });
 });
