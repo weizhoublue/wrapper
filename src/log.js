@@ -1,6 +1,9 @@
 const fs = require("fs");
 const util = require("util");
 
+const _start = new Date();
+const RUN_ID = String(_start.getSeconds()).padStart(3, "0").slice(-3) + String(_start.getMilliseconds()).padStart(3, "0");
+
 let debugEnabled = false;
 let context = { agentName: null, attempt: null, maxAttempts: null };
 
@@ -20,7 +23,7 @@ function sessionLabel() {
 
 function write(level, format, ...args) {
   const msg = util.format(format, ...args);
-  let line = `[wrapper][${level}][${timestamp()}]`;
+  let line = `[wrapper][${RUN_ID}][${level}][${timestamp()}]`;
   if (context.agentName) {
     line += `[${context.agentName}][${sessionLabel()}]`;
   }

@@ -324,7 +324,7 @@ describe("multi-agent fallback E2E", () => {
 
     await runMain(["-t", "claude", "-t", "copilot", "-p", "hello", "-e", "correct", "-r", "2", "-d"]);
 
-    assert.ok(stderrData.includes("[wrapper][error]"), "Should print error level logs");
+    assert.ok(/\[wrapper\]\[\d{6}\]\[error\]/.test(stderrData), "Should print error level logs");
     assert.ok(stderrData.includes("retry needed"), "Should log retry needed");
     assert.ok(stderrData.includes("failed, falling back to next agent"), "Should log fallback at error level");
   });
@@ -369,7 +369,7 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(stderrData.includes("[claude] stderr:"));
     assert.ok(stderrData.includes("[claude] error:"));
     assert.ok(stderrData.includes("all 2 attempts exhausted: regex /bad/ not matched"));
-    assert.ok(!stderrData.includes("[wrapper][error]"), "wrapper logs should stay silent without -d");
+    assert.ok(!/\[wrapper\]\[\d{6}\]\[error\]/.test(stderrData), "wrapper logs should stay silent without -d");
   });
 
   it("stops retrying immediately on exclude match", async () => {
