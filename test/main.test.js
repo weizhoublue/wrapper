@@ -147,7 +147,7 @@ describe("parseArgs", () => {
   it("throttle is enabled by default", () => {
     const opts = parseArgs(["node", "main.js", "-p", "hi"]);
     assert.strictEqual(opts.throttle, true);
-    assert.strictEqual(opts.throttleDuration, 30);
+    assert.strictEqual(opts.throttleDuration, 120);
   });
 
   it("--enable-throttle false sets throttle to false", () => {

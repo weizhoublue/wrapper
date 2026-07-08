@@ -6,6 +6,16 @@ const log = require("./log");
 const LOCK_RETRY = 10;
 const LOCK_WAIT_MS = 50;
 
+function toLocalISOString(date) {
+  const offsetMin = -date.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const absMin = Math.abs(offsetMin);
+  const hh = String(Math.floor(absMin / 60)).padStart(2, "0");
+  const mm = String(absMin % 60).padStart(2, "0");
+  const local = new Date(date.getTime() + offsetMin * 60 * 1000);
+  return local.toISOString().replace("Z", `${sign}${hh}:${mm}`);
+}
+
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -127,13 +137,15 @@ function recordExhausted(type, command, durationMinutes, throttleFile) {
     records.push({
       type,
       command: command || null,
-      startExhausted: now.toISOString(),
-      endExhausted: endExhausted.toISOString(),
+      startExhausted: toLocalISOString(now),
+      endExhausted: toLocalISOString(endExhausted),
     });
     writeRecords(throttleFile, records);
+    log.warn("throttle recordExhausted: agent=%s/%s start=%s end=%s file=%s",
+      type, command || "(default)", toLocalISOString(now), toLocalISOString(endExhausted), throttleFile);
   } finally {
     releaseLock(lockFile);
   }
 }
 
-module.exports = { checkThrottle, recordExhausted };
+module.exports = { checkThrottle, recordExhausted, toLocalISOString };

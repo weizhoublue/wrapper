@@ -5,7 +5,7 @@ const os = require("os");
 const fs = require("fs");
 const log = require("./log");
 const { LimitMsg, isQuotaExceeded, quotaReasonBrief } = require("./limit-msg");
-const { checkThrottle, recordExhausted } = require("./throttle");
+const { checkThrottle, recordExhausted, toLocalISOString } = require("./throttle");
 
 function splitCommand(cmd) {
   const parts = cmd.trim().split(/\s+/);
@@ -57,7 +57,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
     --enable-throttle <true|false>  开启或关闭 throttle 功能（默认: true）
                                 throttle 开启时，若检测到某 agent quota 耗尽，会在冷却期内跳过对该 agent 的调用
                                 throttle 开启时自动强制开启 --quota，不可与 --no-quota 同时使用
-    --throttle-duration <分钟>  quota 耗尽后的冷却时长，单位分钟（默认: 30）
+    --throttle-duration <分钟>  quota 耗尽后的冷却时长，单位分钟（默认: 120）
                                 冷却状态保存在 \${WRAPPER_CONFIG_DIR:-~/.wrapper}/throttle.json（跨进程共享）
     -n, --no-quota          关闭 agent 订阅额度耗尽检测
                                   当前支持 codex copilot gemini
@@ -252,7 +252,7 @@ function parseArgs(argv) {
   // Validate throttle-duration
   const throttleDuration = throttleDurationRaw !== null
     ? parseInt(throttleDurationRaw, 10)
-    : 30;
+    : DEFAULT_THROTTLE_DURATION_MINUTES;
   if (throttleDurationRaw !== null && (Number.isNaN(throttleDuration) || throttleDuration <= 0)) {
     throw new Error("--throttle-duration must be a positive integer (minutes)");
   }
@@ -358,6 +358,8 @@ function buildStderrOutput(agentCommandName, sessionId, result, exitCode) {
   return parts.join("\n");
 }
 
+const DEFAULT_THROTTLE_DURATION_MINUTES = 120;
+
 const EXIT_OK = 0;
 const EXIT_REGEX_MISMATCH = 200;
 const EXIT_EMPTY_OUTPUT = 201;
@@ -458,14 +460,14 @@ async function main() {
       const throttleCommand = agent.isCustom ? agent.command : null;
       const tr = checkThrottle(agent.type, throttleCommand, throttleFile);
       if (tr.throttled) {
-        log.warn("agent %s is throttled until %s, skipping", agent.commandName, tr.endExhausted.toISOString());
+        log.warn("agent %s is throttled until %s, skipping", agent.commandName, toLocalISOString(tr.endExhausted));
         allResults.push({
           commandName: agent.commandName,
           stdout: "",
           stderr: "",
           sessionId: "",
           throttleSkipped: true,
-          wrapperError: `throttled until ${tr.endExhausted.toISOString()}`,
+          wrapperError: `throttled until ${toLocalISOString(tr.endExhausted)}`,
         });
         if (agentIdx < opts.agents.length - 1) {
           log.error("agent %s throttled, falling back to next agent", agent.commandName);
@@ -600,7 +602,7 @@ async function main() {
               recordExhausted(agent.type, throttleCommand, opts.throttleDuration, throttleFile);
               log.warn("agent %s quota exhausted, throttle recorded: %s, duration=%dmin, until=%s",
                 agent.commandName, throttleFile, opts.throttleDuration,
-                new Date(Date.now() + opts.throttleDuration * 60 * 1000).toISOString());
+                toLocalISOString(new Date(Date.now() + opts.throttleDuration * 60 * 1000)));
             }
             agentDone = true;
             break;
