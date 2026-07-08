@@ -28,7 +28,17 @@ function write(level, format, ...args) {
     line += `[${context.agentName}][${sessionLabel()}]`;
   }
   line += ` ${msg}\n`;
-  fs.writeSync(process.stderr.fd, line);
+  // Retry on EAGAIN: occurs when test runner puts stderr fd in O_NONBLOCK mode
+  // and the pipe buffer is momentarily full under high debug output volume.
+  for (let i = 0; i < 3; i++) {
+    try {
+      fs.writeSync(process.stderr.fd, line);
+      return;
+    } catch (e) {
+      if (e.code !== "EAGAIN" || i === 2) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
 }
 
 function info(format, ...args) {
