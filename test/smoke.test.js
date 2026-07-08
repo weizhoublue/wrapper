@@ -2,6 +2,8 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert");
 const { spawn, spawnSync } = require("child_process");
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
 
 const hasClaude = (() => {
   try {
@@ -11,12 +13,13 @@ const hasClaude = (() => {
 })();
 
 const mainJs = path.join(__dirname, "..", "src", "main.js");
+const smokeConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "wrapper-smoke-"));
 
 function runCommu(args = []) {
   return new Promise((resolve) => {
     const child = spawn("node", [mainJs, ...args], {
       cwd: path.join(__dirname, ".."),
-      env: process.env,
+      env: { ...process.env, WRAPPER_CONFIG_DIR: smokeConfigDir },
       stdio: "pipe",
     });
     let stdout = "", stderr = "";
