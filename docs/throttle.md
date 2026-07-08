@@ -23,7 +23,7 @@ wrapper -t claude -c "claude-deepseek-flash" -t codex --enable-throttle false -p
 | 选项 | 说明 | 默认值 |
 |------|------|--------|
 | `--enable-throttle <true\|false>` | 开启或关闭 throttle 功能 | `true` |
-| `--throttle-duration <分钟>` | quota 耗尽后的冷却时长（分钟） | `30` |
+| `--throttle-duration <分钟>` | quota 耗尽后的冷却时长（分钟） | `120` |
 
 ### 与 `--no-quota` 的冲突
 

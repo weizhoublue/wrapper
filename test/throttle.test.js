@@ -3,7 +3,7 @@ const assert = require("node:assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { checkThrottle, recordExhausted } = require("../src/throttle");
+const { checkThrottle, recordExhausted, toLocalISOString } = require("../src/throttle");
 
 let tmpDir;
 let throttleFile;
@@ -179,5 +179,37 @@ describe("throttle module", () => {
     assert.deepStrictEqual(result, { throttled: false });
     const records = JSON.parse(fs.readFileSync(throttleFile, "utf8"));
     assert.strictEqual(records.length, 0);
+  });
+});
+
+describe("toLocalISOString", () => {
+  it("produces local time with timezone offset suffix", () => {
+    const d = new Date("2026-07-08T13:00:00.000Z");
+    const result = toLocalISOString(d);
+    // must end with +HH:MM or -HH:MM, not Z
+    assert.match(result, /[+-]\d{2}:\d{2}$/);
+    assert.ok(!result.endsWith("Z"));
+  });
+
+  it("round-trips: new Date(toLocalISOString(d)) equals original", () => {
+    const d = new Date("2026-07-08T13:00:00.000Z");
+    const reparsed = new Date(toLocalISOString(d));
+    assert.strictEqual(reparsed.getTime(), d.getTime());
+  });
+
+  it("recordExhausted writes local time strings to file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wrapper-local-time-"));
+    const file = path.join(dir, "throttle.json");
+    try {
+      recordExhausted("claude", "local-time-test", 30, file);
+      const records = JSON.parse(fs.readFileSync(file, "utf8"));
+      assert.strictEqual(records.length, 1);
+      assert.match(records[0].startExhausted, /[+-]\d{2}:\d{2}$/);
+      assert.match(records[0].endExhausted,   /[+-]\d{2}:\d{2}$/);
+      // round-trip comparison still works
+      assert.ok(new Date(records[0].endExhausted) > new Date(records[0].startExhausted));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
