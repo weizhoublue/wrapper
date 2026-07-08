@@ -74,19 +74,28 @@ function matchRecord(r, type, command) {
 function checkThrottle(type, command, throttleFile) {
   // Step 1: 无锁读取
   const records = readRecords(throttleFile);
+  log.debug("throttle checkThrottle: agent=%s/%s file=%s records=%d",
+    type, command || "(default)", throttleFile, records.length);
+
   const idx = records.findIndex((r) => matchRecord(r, type, command));
 
-  if (idx === -1) return { throttled: false };
+  if (idx === -1) {
+    log.debug("throttle checkThrottle: no record found for agent=%s/%s, proceeding", type, command || "(default)");
+    return { throttled: false };
+  }
 
   const record = records[idx];
   const endExhausted = new Date(record.endExhausted);
 
   if (endExhausted > new Date()) {
-    // 冷却期内，无需写文件，直接返回
+    log.debug("throttle checkThrottle: agent=%s/%s is within cooldown, throttled until %s",
+      type, command || "(default)", toLocalISOString(endExhausted));
     return { throttled: true, endExhausted };
   }
 
   // 已过期 → 加锁后 double-check，再删除
+  log.debug("throttle checkThrottle: record expired for agent=%s/%s (end=%s), cleaning up",
+    type, command || "(default)", toLocalISOString(endExhausted));
   const lockFile = throttleFile + ".lock";
   const locked = acquireLock(lockFile);
   try {
@@ -95,18 +104,16 @@ function checkThrottle(type, command, throttleFile) {
     if (freshIdx !== -1) {
       const freshEnd = new Date(fresh[freshIdx].endExhausted);
       if (freshEnd <= new Date()) {
-        // 仍过期 → 删除
-        log.debug("throttle checkThrottle: removing expired record for %s/%s", type, command);
+        log.debug("throttle checkThrottle: removing expired record for %s/%s", type, command || "(default)");
         fresh.splice(freshIdx, 1);
         writeRecords(throttleFile, fresh);
       }
-      // 若 freshEnd > new Date()（极罕见：两次读之间被更新），保持不变
     }
-    // 若 freshIdx === -1，已被其他进程删除，无需操作
   } finally {
     if (locked) releaseLock(lockFile);
   }
 
+  log.debug("throttle checkThrottle: agent=%s/%s cooldown expired, proceeding", type, command || "(default)");
   return { throttled: false };
 }
 

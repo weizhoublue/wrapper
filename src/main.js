@@ -432,6 +432,9 @@ async function main() {
   }
   log.debug("prompt=%s timeout=%ds retry=%d reg=%s exclude=%s quota=%s",
     opts.prompt.slice(0, 100), opts.timeout, opts.retry, opts.reg || "(none)", opts.exclude || "(none)", opts.quota);
+  log.debug("config dir=%s (WRAPPER_CONFIG_DIR=%s)", configDir, process.env.WRAPPER_CONFIG_DIR || "(unset, using default)");
+  log.debug("throttle=%s duration=%dmin file=%s",
+    opts.throttle ? "enabled" : "disabled", opts.throttleDuration, throttleFile);
 
   const providers = {
     claude: require("./provider/claude"),
@@ -478,6 +481,7 @@ async function main() {
         process.stderr.write(buildStderrOutput(agent.commandName, "", lastEntry, EXIT_THROTTLE_SKIP) + "\n");
         process.exit(EXIT_THROTTLE_SKIP);
       }
+      log.debug("throttle check passed for agent %s, proceeding to call", agent.commandName);
     }
     // --- end throttle check ---
 
