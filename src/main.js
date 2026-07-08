@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 const { parseArgs: nodeParseArgs } = require("node:util");
+const path = require("path");
+const os = require("os");
+const fs = require("fs");
 const log = require("./log");
 const { LimitMsg, isQuotaExceeded, quotaReasonBrief } = require("./limit-msg");
+const { checkThrottle, recordExhausted } = require("./throttle");
 
 function splitCommand(cmd) {
   const parts = cmd.trim().split(/\s+/);
@@ -50,6 +54,11 @@ const HELP = `用法: wrapper -p <提示词> [选项]
     -q, --quota             开启 agent 订阅额度耗尽检测（默认开启）
                                   如果 agent 退出失败，且标准输出或标准错误输出中包含额度耗尽提示，
                                   则直接宣告当前 agent 失败，不再重试该 agent
+    --enable-throttle <true|false>  开启或关闭 throttle 功能（默认: true）
+                                throttle 开启时，若检测到某 agent quota 耗尽，会在冷却期内跳过对该 agent 的调用
+                                throttle 开启时自动强制开启 --quota，不可与 --no-quota 同时使用
+    --throttle-duration <分钟>  quota 耗尽后的冷却时长，单位分钟（默认: 30）
+                                冷却状态保存在 \${WRAPPER_CONFIG_DIR:-~/.wrapper}/throttle.json（跨进程共享）
     -n, --no-quota          关闭 agent 订阅额度耗尽检测
                                   当前支持 codex copilot gemini
                                   还不支持 claude cursor （不知道长什么样） 
@@ -69,6 +78,19 @@ const HELP = `用法: wrapper -p <提示词> [选项]
               倒数第三行为退出码，倒数第二行为 agent 命令名，最后一行为会话 ID
               多 agent fallback 时，中间失败 agent 的输出仅在 -d 调试日志中可见
     退出码   = 最后一个 agent 的退出码
+              特定退出码：
+                0   成功
+                200 正则不匹配（-e 选项）
+                201 输出为空
+                202 provider 内部错误
+                203 超时（-o 选项）
+                204 命令未找到
+                205 排除模式匹配（-x 选项）
+                206 quota 耗尽
+                207 所有 agent 均被 throttle 跳过（冷却期内）
+
+环境变量：
+    WRAPPER_CONFIG_DIR    配置目录，默认 ~/.wrapper ， 其中有 throttle.json 用于 throttle 功能的跨进程的记录共享
 
 
 ----------------------------- 例子 ----------------------------
@@ -113,6 +135,10 @@ opencode:
     wrapper -t opencode -d -p "tomorrow will rain" 2>/tmp/sid
     session=$(tail -1 /tmp/sid)
     wrapper -t opencode -s \${session} -d -p "tell me all what I have said in this session"
+
+throttle:
+    wrapper -t claude -c "claude-deepseek-flash" -t codex --throttle-duration 60 -p "say hi in one word"
+    wrapper -t claude -c "claude-deepseek-flash" --enable-throttle false -p "say hi in one word"
 
 fallback:
     wrapper -t claude -c "claude-deepseek-flash" -t codex -t copilot -d -p  "say hi in one word" 2>/tmp/sid
@@ -193,10 +219,13 @@ function parseArgs(argv) {
     }
   }
 
-  // Strip -q/--quota and -n/--no-quota before strict parse (symmetric boolean flags)
+  // Strip quota/throttle flags before strict parse
   let quotaExplicit = null; // null → default true
+  let throttleExplicit = null; // null → default true
+  let throttleDurationRaw = null;
   const parsedRemainingArgs = [];
-  for (const arg of remainingArgs) {
+  for (let i = 0; i < remainingArgs.length; i++) {
+    const arg = remainingArgs[i];
     if (arg === "--no-quota" || arg === "-n") {
       if (quotaExplicit === true) {
         throw new Error("conflicting options: -q/--quota and -n/--no-quota");
@@ -207,10 +236,36 @@ function parseArgs(argv) {
         throw new Error("conflicting options: -q/--quota and -n/--no-quota");
       }
       quotaExplicit = true;
+    } else if (arg === "--enable-throttle") {
+      const val = remainingArgs[++i];
+      if (!val || !["true", "false"].includes(val.toLowerCase())) {
+        throw new Error("--enable-throttle requires a value: true or false");
+      }
+      throttleExplicit = val.toLowerCase() === "true";
+    } else if (arg === "--throttle-duration") {
+      throttleDurationRaw = remainingArgs[++i];
     } else {
       parsedRemainingArgs.push(arg);
     }
   }
+
+  // Validate throttle-duration
+  const throttleDuration = throttleDurationRaw !== null
+    ? parseInt(throttleDurationRaw, 10)
+    : 30;
+  if (throttleDurationRaw !== null && (Number.isNaN(throttleDuration) || throttleDuration <= 0)) {
+    throw new Error("--throttle-duration must be a positive integer (minutes)");
+  }
+
+  const throttleEnabled = throttleExplicit !== null ? throttleExplicit : true;
+
+  // Conflict: --no-quota + throttle enabled
+  if (quotaExplicit === false && throttleEnabled) {
+    throw new Error("--no-quota cannot be used with throttle enabled; use --enable-throttle false first");
+  }
+
+  // throttle forces quota on
+  const quota = throttleEnabled ? true : (quotaExplicit !== null ? quotaExplicit : true);
 
   // Phase 2: parse remaining options
   const { values } = nodeParseArgs({
@@ -244,11 +299,13 @@ function parseArgs(argv) {
     debug: values.debug,
     reg: values.reg || "",
     exclude: values.exclude || "",
-    quota: quotaExplicit !== null ? quotaExplicit : true,
+    quota,
     retry: Number.isNaN(retry) ? 2 : retry,
     resume,
     timeout: Number.isNaN(timeout) ? DEFAULT_TIMEOUT : timeout,
     agents,
+    throttle: throttleEnabled,
+    throttleDuration,
   };
 }
 
@@ -269,6 +326,7 @@ function resolveExitCode(result, regex) {
   }
   if (result.sendFailed) return EXIT_PROVIDER_ERROR;
   if (result.timedOut) return EXIT_TIMEOUT;
+  if (result.throttleSkipped) return EXIT_THROTTLE_SKIP;
   if (result.quotaExceeded) return EXIT_QUOTA_EXCEEDED;
   if (result.exitCode && result.exitCode !== 0) return result.exitCode;
   if (result.excludeMatched) return EXIT_EXCLUDE_MATCH;
@@ -308,6 +366,7 @@ const EXIT_TIMEOUT = 203;
 const EXIT_COMMAND_NOT_FOUND = 204;
 const EXIT_EXCLUDE_MATCH = 205;
 const EXIT_QUOTA_EXCEEDED = 206;
+const EXIT_THROTTLE_SKIP = 207;
 
 function collapseBlankLines(text) {
   return text.replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "").replace(/\n+$/, "");
@@ -348,6 +407,9 @@ function logAttemptOutput(agentName, attempt, stdout, stderr) {
 
 async function main() {
   const opts = parseArgs(process.argv);
+  const configDir = process.env.WRAPPER_CONFIG_DIR || path.join(os.homedir(), ".wrapper");
+  if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+  const throttleFile = path.join(configDir, "throttle.json");
 
   // Validate custom commands existence early
   for (const agent of opts.agents) {
@@ -390,6 +452,32 @@ async function main() {
       process.stderr.write(`Error: unknown provider type: ${agent.type}\n`);
       process.exit(EXIT_PROVIDER_ERROR);
     }
+
+    // --- throttle check ---
+    if (opts.throttle) {
+      const throttleCommand = agent.isCustom ? agent.command : null;
+      const tr = checkThrottle(agent.type, throttleCommand, throttleFile);
+      if (tr.throttled) {
+        log.warn("agent %s is throttled until %s, skipping", agent.commandName, tr.endExhausted.toISOString());
+        allResults.push({
+          commandName: agent.commandName,
+          stdout: "",
+          stderr: "",
+          sessionId: "",
+          throttleSkipped: true,
+          wrapperError: `throttled until ${tr.endExhausted.toISOString()}`,
+        });
+        if (agentIdx < opts.agents.length - 1) {
+          log.error("agent %s throttled, falling back to next agent", agent.commandName);
+          continue;
+        }
+        process.stdout.write("\n");
+        const lastEntry = allResults[allResults.length - 1];
+        process.stderr.write(buildStderrOutput(agent.commandName, "", lastEntry, EXIT_THROTTLE_SKIP) + "\n");
+        process.exit(EXIT_THROTTLE_SKIP);
+      }
+    }
+    // --- end throttle check ---
 
     log.info("trying agent %d/%d: %s (%s)", agentIdx + 1, opts.agents.length, agent.commandName, agent.type);
     log.setContext({ agentName: agent.commandName });
@@ -507,6 +595,13 @@ async function main() {
               quotaExceeded: true,
               wrapperError: quotaReasonBrief(pattern),
             });
+            if (opts.throttle) {
+              const throttleCommand = agent.isCustom ? agent.command : null;
+              recordExhausted(agent.type, throttleCommand, opts.throttleDuration, throttleFile);
+              log.warn("agent %s quota exhausted, throttle recorded: %s, duration=%dmin, until=%s",
+                agent.commandName, throttleFile, opts.throttleDuration,
+                new Date(Date.now() + opts.throttleDuration * 60 * 1000).toISOString());
+            }
             agentDone = true;
             break;
           }
@@ -613,4 +708,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, timeoutReasonBrief, LimitMsg, isQuotaExceeded, quotaReasonBrief, DEFAULT_TIMEOUT, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH, EXIT_QUOTA_EXCEEDED };
+module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, timeoutReasonBrief, LimitMsg, isQuotaExceeded, quotaReasonBrief, DEFAULT_TIMEOUT, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH, EXIT_QUOTA_EXCEEDED, EXIT_THROTTLE_SKIP };

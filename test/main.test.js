@@ -113,12 +113,12 @@ describe("parseArgs", () => {
   });
 
   it("parses --no-quota", () => {
-    const opts = parseArgs(["node", "main.js", "-p", "hi", "--no-quota"]);
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "--no-quota", "--enable-throttle", "false"]);
     assert.strictEqual(opts.quota, false);
   });
 
   it("parses -n short form for --no-quota", () => {
-    const opts = parseArgs(["node", "main.js", "-p", "hi", "-n"]);
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "-n", "--enable-throttle", "false"]);
     assert.strictEqual(opts.quota, false);
   });
 
@@ -142,6 +142,68 @@ describe("parseArgs", () => {
   it("sets isCustom to undefined/falsy when -c/--command is not specified", () => {
     const opts = parseArgs(["node", "main.js", "-p", "hi"]);
     assert.strictEqual(opts.agents[0].isCustom, undefined);
+  });
+
+  it("throttle is enabled by default", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi"]);
+    assert.strictEqual(opts.throttle, true);
+    assert.strictEqual(opts.throttleDuration, 30);
+  });
+
+  it("--enable-throttle false sets throttle to false", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "--enable-throttle", "false"]);
+    assert.strictEqual(opts.throttle, false);
+  });
+
+  it("--enable-throttle true sets throttle to true", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "--enable-throttle", "true"]);
+    assert.strictEqual(opts.throttle, true);
+  });
+
+  it("--enable-throttle without value throws", () => {
+    assert.throws(
+      () => parseArgs(["node", "main.js", "-p", "hi", "--enable-throttle"]),
+      /--enable-throttle requires a value: true or false/
+    );
+  });
+
+  it("--enable-throttle with invalid value throws", () => {
+    assert.throws(
+      () => parseArgs(["node", "main.js", "-p", "hi", "--enable-throttle", "yes"]),
+      /--enable-throttle requires a value: true or false/
+    );
+  });
+
+  it("--throttle-duration sets custom duration", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "--throttle-duration", "60"]);
+    assert.strictEqual(opts.throttleDuration, 60);
+  });
+
+  it("--throttle-duration with non-integer throws", () => {
+    assert.throws(
+      () => parseArgs(["node", "main.js", "-p", "hi", "--throttle-duration", "abc"]),
+      /throttle-duration must be a positive integer/
+    );
+  });
+
+  it("--throttle-duration with zero throws", () => {
+    assert.throws(
+      () => parseArgs(["node", "main.js", "-p", "hi", "--throttle-duration", "0"]),
+      /throttle-duration must be a positive integer/
+    );
+  });
+
+  it("--no-quota with throttle enabled throws conflict error", () => {
+    assert.throws(
+      () => parseArgs(["node", "main.js", "-p", "hi", "--no-quota"]),
+      /--no-quota cannot be used with throttle enabled/
+    );
+  });
+
+  it("--no-quota with --enable-throttle false is allowed", () => {
+    const opts = parseArgs(["node", "main.js", "-p", "hi", "--no-quota", "--enable-throttle", "false"]);
+    assert.strictEqual(opts.throttle, false);
+    assert.strictEqual(opts.quota, false);
   });
 });
 

@@ -1,7 +1,8 @@
-const { describe, it, beforeEach, afterEach } = require("node:test");
+const { describe, it, before, after, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
 // Mock the providers
 const providers = ["claude", "codex", "copilot", "gemini", "cursor", "opencode"];
@@ -42,6 +43,8 @@ const { main, EXIT_OK, EXIT_TIMEOUT, EXIT_PROVIDER_ERROR, EXIT_COMMAND_NOT_FOUND
 
 
 describe("multi-agent fallback E2E", () => {
+  let tmpDir;
+  let originalConfigDir;
   let originalExit;
   let originalWrite;
   let originalErrWrite;
@@ -52,8 +55,23 @@ describe("multi-agent fallback E2E", () => {
   let stdoutData = "";
   let stderrData = "";
 
+  before(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wrapper-fallback-e2e-"));
+  });
+
+  after(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   beforeEach(() => {
     log.setDebug(false);
+    originalConfigDir = process.env.WRAPPER_CONFIG_DIR;
+    process.env.WRAPPER_CONFIG_DIR = tmpDir;
+    const throttleFile = path.join(tmpDir, "throttle.json");
+    if (fs.existsSync(throttleFile)) fs.unlinkSync(throttleFile);
+    const lockFile = throttleFile + ".lock";
+    if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
+
     // Reset provider mocks
     for (const p of providers) {
       mockProviders[p].createSessionMock = null;
@@ -98,6 +116,8 @@ describe("multi-agent fallback E2E", () => {
     process.stderr.write = originalErrWrite;
     process.argv = originalArgv;
     fs.writeSync = originalWriteSync;
+    if (originalConfigDir === undefined) delete process.env.WRAPPER_CONFIG_DIR;
+    else process.env.WRAPPER_CONFIG_DIR = originalConfigDir;
   });
 
   async function runMain(args) {
@@ -632,7 +652,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "codex", "-p", "hello", "--no-quota"]);
+    await runMain(["-t", "codex", "-p", "hello", "--no-quota", "--enable-throttle", "false"]);
 
     assert.strictEqual(exitCode, 1);
     assert.ok(stderrData.includes("non-zero exit code 1"));
@@ -647,7 +667,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "codex", "-p", "hello", "-n"]);
+    await runMain(["-t", "codex", "-p", "hello", "-n", "--enable-throttle", "false"]);
 
     assert.strictEqual(exitCode, 1);
     assert.ok(stderrData.includes("non-zero exit code 1"));

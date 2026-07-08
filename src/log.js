@@ -43,6 +43,9 @@ function debug(format, ...args) {
   if (!debugEnabled) return;
   write("debug", format, ...args);
 }
+function warn(format, ...args) {
+  write("warning", format, ...args);
+}
 function setDebug(v) { debugEnabled = v; }
 function isDebug() { return debugEnabled; }
 
@@ -54,4 +57,4 @@ function clearContext() {
   context = { agentName: null, attempt: null, maxAttempts: null };
 }
 
-module.exports = { info, error, debug, setDebug, isDebug, setContext, clearContext };
+module.exports = { info, error, debug, warn, setDebug, isDebug, setContext, clearContext };
