@@ -60,6 +60,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
     --throttle-duration <分钟>        quota 耗尽后的冷却时长，单位分钟（默认: 120）
                                          冷却状态跨进程共享在 ~/.wrapper/throttle.json
     -n, --no-quota                   关闭 agent 订阅额度耗尽检测
+                                        检测开启时，如果 api 返回结果显示额度耗尽，则不再重试该 agent，直接 fallback 到下一个 agent
                                         当前支持 codex copilot gemini
                                         支持定制版 opencode (开源版本会卡住等待而不退出)
                                         不支持 claude 和 cursor（不知道长什么样） 
