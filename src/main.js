@@ -43,34 +43,35 @@ const HELP = `用法: wrapper -p <提示词> [选项]
     -p, --prompt <文本>     用户提示词
 
 选项:
-    -t, --type <名称>        代理类型: claude, codex, copilot, gemini, cursor, agy, opencode (默认: claude)
-                            可多次指定该选项，实现 fallback 调用 agent
-    -c, --command <命令>     执行命令 (须紧跟 -t 之后，默认根据 -t 决定)
-    -d, --debug             开启调试日志输出到 stderr
-    -e, --reg <模式>         匹配标准输出的正则表达式(大小写不敏感)
-                                如果匹配失败，则会重试运行命令 
-    -x, --exclude <模式>     匹配标准输出的正则表达式(大小写不敏感)
-                                如果匹配成功，则直接宣告当前 agent 失败，不再重试该 agent
-    -q, --quota             开启 agent 订阅额度耗尽检测（默认开启）
-                                  如果 agent 退出失败，且标准输出或标准错误输出中包含额度耗尽提示，
-                                  则直接宣告当前 agent 失败，不再重试该 agent
-    --enable-throttle <true|false>  开启或关闭 throttle 功能（默认: true）
-                                throttle 开启时，若检测到某 agent quota 耗尽，会在冷却期内跳过对该 agent 的调用
-                                throttle 开启时自动强制开启 --quota，不可与 --no-quota 同时使用
-    --throttle-duration <分钟>  quota 耗尽后的冷却时长，单位分钟（默认: 120）
-                                冷却状态保存在 \${WRAPPER_CONFIG_DIR:-~/.wrapper}/throttle.json（跨进程共享）
-    -n, --no-quota          关闭 agent 订阅额度耗尽检测
-                                  当前支持 codex copilot gemini
-                                  还不支持 claude cursor （不知道长什么样） 
-                                  这些无法检测  agy（无任何提示）   opencode（卡住不退出）
-    -r, --retry <次数>       每个 agent 最大重试次数 ，每次重试都使用前一次的会话来继续(默认: 2)
-                                如果多次指定 -t，每个 agent 有独立的重试次数
-                                如果不满足 -e 选项、-o 选项、 或者命令返回码非0、或者返回空的标准输出，则会重试运行
-                                -x 选项匹配时，直接不重试
-    -s, --resume <id>       恢复之前的会话（不能同多次调用 -t 配合）
-    -o, --timeout <秒>      单次 attempt 超时秒数，超时后纳入 -r 重试 (默认: 3600，即 1 小时；0 表示不限时)
-    -h, --help              显示此帮助
-    -v, --version           显示版本号
+    -t, --type <名称>                 代理类型: claude, codex, copilot, gemini, cursor, agy, opencode (默认: claude)
+                                          可多次指定该选项，实现 fallback 调用 agent
+    -c, --command <命令>              执行命令 (须紧跟 -t 之后，默认根据 -t 决定)
+    -d, --debug                      开启调试日志输出到 stderr
+    -e, --reg <模式>                  匹配标准输出的正则表达式(大小写不敏感)
+                                         如果匹配失败，则会重试运行命令 
+    -x, --exclude <模式>              匹配标准输出的正则表达式(大小写不敏感)
+                                         如果匹配成功，则直接宣告当前 agent 失败，不再重试该 agent
+    -q, --quota                      开启 agent 订阅额度耗尽检测（默认开启）
+                                         如果 agent 退出失败，且标准输出或标准错误输出中包含额度耗尽提示，
+                                         则直接宣告当前 agent 失败，不再重试该 agent
+    --enable-throttle <true|false>   开启或关闭 throttle 功能（默认: true）
+                                         throttle 开启时，若检测到某 agent quota 耗尽，会在冷却期内跳过对该 agent 的调用
+                                         throttle 开启时自动强制开启 --quota，不可与 --no-quota 同时使用
+    --throttle-duration <分钟>        quota 耗尽后的冷却时长，单位分钟（默认: 120）
+                                         冷却状态跨进程共享在 ~/.wrapper/throttle.json
+    -n, --no-quota                   关闭 agent 订阅额度耗尽检测
+                                        当前支持 codex copilot gemini
+                                        支持定制版 opencode (开源版本会卡住等待而不退出)
+                                        不支持 claude 和 cursor（不知道长什么样） 
+                                        无法检测 agy（无任何提示）
+    -r, --retry <次数>               每个 agent 最大重试次数 ，每次重试都使用前一次的会话来继续(默认: 2)
+                                       如果多次指定 -t，每个 agent 有独立的重试次数
+                                       如果不满足 -e 选项、-o 选项、 或者命令返回码非0、或者返回空的标准输出，则会重试运行
+                                       -x 选项匹配时，直接不重试
+    -s, --resume <id>               恢复之前的会话（不能同多次调用 -t 配合）
+    -o, --timeout <秒>              单次 attempt 超时秒数，超时后纳入 -r 重试 (默认: 3600，即 1 小时；0 表示不限时)
+    -h, --help                      显示此帮助
+    -v, --version                   显示版本号
 
 输出:
     stdout  = 最后一个 agent 的标准输出
@@ -90,8 +91,7 @@ const HELP = `用法: wrapper -p <提示词> [选项]
                 207 所有 agent 均被 throttle 跳过（冷却期内）
 
 环境变量：
-    WRAPPER_CONFIG_DIR    配置目录，默认 ~/.wrapper ， 其中有 throttle.json 用于 throttle 功能的跨进程的记录共享
-
+    WRAPPER_CONFIG_DIR    配置工作目录，默认 ~/.wrapper ， 其中有 throttle.json 用于 throttle 功能的跨进程的记录共享
 
 ----------------------------- 例子 ----------------------------
 
