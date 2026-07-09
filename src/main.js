@@ -458,6 +458,9 @@ async function main() {
       process.exit(EXIT_PROVIDER_ERROR);
     }
 
+    log.info("trying agent %d/%d: %s (%s)", agentIdx + 1, opts.agents.length, agent.commandName, agent.type);
+    log.setContext({ agentName: agent.commandName });
+
     // --- throttle check ---
     if (opts.throttle) {
       const throttleCommand = agent.isCustom ? agent.command : null;
@@ -481,12 +484,8 @@ async function main() {
         process.stderr.write(buildStderrOutput(agent.commandName, "", lastEntry, EXIT_THROTTLE_SKIP) + "\n");
         process.exit(EXIT_THROTTLE_SKIP);
       }
-      log.debug("throttle check passed for agent %s, proceeding to call", agent.commandName);
     }
     // --- end throttle check ---
-
-    log.info("trying agent %d/%d: %s (%s)", agentIdx + 1, opts.agents.length, agent.commandName, agent.type);
-    log.setContext({ agentName: agent.commandName });
 
     let session;
     try {
@@ -604,7 +603,7 @@ async function main() {
             if (opts.throttle) {
               const throttleCommand = agent.isCustom ? agent.command : null;
               recordExhausted(agent.type, throttleCommand, opts.throttleDuration, throttleFile);
-              log.warn("agent %s quota exhausted, throttle recorded: %s, duration=%dmin, until=%s",
+              log.error("agent %s quota exhausted, throttle recorded: %s, duration=%dmin, until=%s",
                 agent.commandName, throttleFile, opts.throttleDuration,
                 toLocalISOString(new Date(Date.now() + opts.throttleDuration * 60 * 1000)));
             }
