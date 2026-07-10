@@ -1,7 +1,14 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 
-const { extractText, extractThinking, inferAcpExitCode, splitCommand } = require("../../src/provider/acp");
+const {
+  extractText,
+  extractThinking,
+  inferAcpExitCode,
+  splitCommand,
+  send,
+  terminateChild,
+} = require("../../src/provider/acp");
 
 describe("ACP - extractText", () => {
   it("extracts text from agent_message_chunk notifications", () => {
@@ -228,5 +235,64 @@ describe("ACP - splitCommand", () => {
       command: "codex",
       args: ["--model", "gpt-5"],
     });
+  });
+});
+
+describe("ACP - session lifecycle", () => {
+  it("does not send a prompt after its deadline expires", async () => {
+    let promptCalled = false;
+    const result = await send({
+      closed: false,
+      client: { notifications: [] },
+      deadline: Date.now() - 1,
+      childStderr: () => "",
+      sessionId: "session-1",
+      provider: "copilot",
+      childExitCode: () => null,
+      connection: {
+        prompt: async () => {
+          promptCalled = true;
+          return { stopReason: "end_turn", content: [] };
+        },
+      },
+    }, "hello");
+
+    assert.strictEqual(promptCalled, false);
+    assert.strictEqual(result.timedOut, true);
+  });
+
+  it("clears its timeout after a prompt completes", async () => {
+    const originalSetTimeout = global.setTimeout;
+    const originalClearTimeout = global.clearTimeout;
+    const timer = {};
+    let clearedTimer;
+    global.setTimeout = () => timer;
+    global.clearTimeout = (value) => { clearedTimer = value; };
+
+    try {
+      await send({
+        closed: false,
+        client: { notifications: [] },
+        deadline: Date.now() + 60_000,
+        childStderr: () => "",
+        sessionId: "session-1",
+        provider: "copilot",
+        childExitCode: () => null,
+        connection: {
+          prompt: async () => ({ stopReason: "end_turn", content: [] }),
+        },
+      }, "hello");
+    } finally {
+      global.setTimeout = originalSetTimeout;
+      global.clearTimeout = originalClearTimeout;
+    }
+
+    assert.strictEqual(clearedTimer, timer);
+  });
+
+  it("terminates a child process with SIGTERM", () => {
+    const signals = [];
+    terminateChild({ kill: (signal) => signals.push(signal) });
+    assert.deepStrictEqual(signals, ["SIGTERM"]);
   });
 });

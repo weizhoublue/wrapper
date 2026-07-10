@@ -5,6 +5,7 @@ const log = require("./log");
 
 const LOCK_RETRY = 10;
 const LOCK_WAIT_MS = 50;
+const LOCK_STALE_MS = 5 * 60 * 1000;
 
 function toLocalISOString(date) {
   const offsetMin = -date.getTimezoneOffset();
@@ -23,8 +24,7 @@ function sleep(ms) {
 function acquireLock(lockFile) {
   for (let i = 0; i < LOCK_RETRY; i++) {
     try {
-      const fd = fs.openSync(lockFile, "wx");
-      fs.closeSync(fd);
+      createLock(lockFile);
       return true;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
@@ -34,17 +34,55 @@ function acquireLock(lockFile) {
       if (i < LOCK_RETRY - 1) sleep(LOCK_WAIT_MS);
     }
   }
-  // 全部重试失败 → 尝试删除 stale lockfile 并再试一次
+  if (!isStaleLock(lockFile)) {
+    log.warn("throttle lock acquisition failed after all retries: %s", lockFile);
+    return false;
+  }
+
   log.warn("throttle stale lock detected, removing and retrying: %s", lockFile);
   try {
     fs.unlinkSync(lockFile);
-    const fd = fs.openSync(lockFile, "wx");
-    fs.closeSync(fd);
+    createLock(lockFile);
     return true;
   } catch {
     log.warn("throttle lock acquisition failed after all retries: %s", lockFile);
     return false;
   }
+}
+
+function createLock(lockFile) {
+  const fd = fs.openSync(lockFile, "wx");
+  try {
+    fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
+  } catch (err) {
+    try { fs.unlinkSync(lockFile); } catch {}
+    throw err;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function isStaleLock(lockFile) {
+  let stat;
+  try {
+    stat = fs.statSync(lockFile);
+  } catch {
+    return false;
+  }
+
+  try {
+    const { pid } = JSON.parse(fs.readFileSync(lockFile, "utf8"));
+    if (Number.isInteger(pid) && pid > 0) {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch (err) {
+        return err.code === "ESRCH";
+      }
+    }
+  } catch {}
+
+  return Date.now() - stat.mtimeMs >= LOCK_STALE_MS;
 }
 
 function releaseLock(lockFile) {
@@ -98,6 +136,11 @@ function checkThrottle(type, command, throttleFile) {
     type, command || "(default)", toLocalISOString(endExhausted));
   const lockFile = throttleFile + ".lock";
   const locked = acquireLock(lockFile);
+  if (!locked) {
+    log.warn("throttle checkThrottle: lock failed, skipping expired record cleanup for %s/%s",
+      type, command || "(default)");
+    return { throttled: false };
+  }
   try {
     const fresh = readRecords(throttleFile);
     const freshIdx = fresh.findIndex((r) => matchRecord(r, type, command));
@@ -110,7 +153,7 @@ function checkThrottle(type, command, throttleFile) {
       }
     }
   } finally {
-    if (locked) releaseLock(lockFile);
+    releaseLock(lockFile);
   }
 
   log.debug("throttle checkThrottle: agent=%s/%s cooldown expired, proceeding", type, command || "(default)");

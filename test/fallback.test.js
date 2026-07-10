@@ -123,13 +123,23 @@ describe("multi-agent fallback E2E", () => {
   async function runMain(args) {
     process.argv = ["node", "main.js", ...args];
     try {
-      await main();
+      const code = await main();
+      if (code !== undefined) exitCode = code;
     } catch (err) {
       if (!err.message.startsWith("ProcessExited")) {
         throw err;
       }
     }
   }
+
+  it("returns a successful exit code without terminating the process", async () => {
+    process.argv = ["node", "main.js", "-t", "claude", "-p", "hello"];
+
+    const code = await main();
+
+    assert.strictEqual(code, EXIT_OK);
+    assert.strictEqual(exitCode, null);
+  });
 
   it("first agent succeeds, subsequent agents are ignored", async () => {
     let copilotCalled = false;
@@ -498,10 +508,10 @@ describe("multi-agent fallback E2E", () => {
     assert.ok(stderrData.includes("quota exceeded: /FreeUsageLimitError/i matched"));
   });
 
-  it("exits 206 when opencode free usage exceeded matches on non-zero exit", async () => {
+  it("exits 206 when opencode quota marker matches on non-zero exit", async () => {
     mockProviders.opencode.sendMock = () => ({
       stdout: "",
-      stderr: "Free usage exceeded",
+      stderr: "OPENCODE_QUOTA_LIMIT",
       sessionId: "opencode-session",
       exitCode: 1,
     });
@@ -510,10 +520,10 @@ describe("multi-agent fallback E2E", () => {
 
     assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
     assert.ok(stderrData.includes("[opencode] error:"));
-    assert.ok(stderrData.includes("quota exceeded: /Free usage exceeded|usage limit reached|Rate limit exceeded|Subscription quota exceeded/i matched"));
+    assert.ok(stderrData.includes("quota exceeded: /OPENCODE_QUOTA_LIMIT/i matched"));
   });
 
-  it("exits 206 when opencode rate limit exceeded matches on non-zero exit", async () => {
+  it("does not treat previous opencode quota text as quota", async () => {
     mockProviders.opencode.sendMock = () => ({
       stdout: "",
       stderr: "Rate limit exceeded",
@@ -523,9 +533,9 @@ describe("multi-agent fallback E2E", () => {
 
     await runMain(["-t", "opencode", "-p", "hello"]);
 
-    assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
+    assert.strictEqual(exitCode, 1);
     assert.ok(stderrData.includes("[opencode] error:"));
-    assert.ok(stderrData.includes("quota exceeded: /Free usage exceeded|usage limit reached|Rate limit exceeded|Subscription quota exceeded/i matched"));
+    assert.ok(stderrData.includes("non-zero exit code 1"));
   });
 
   it("falls back to next agent when first agent hits quota", async () => {

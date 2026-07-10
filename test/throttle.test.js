@@ -69,6 +69,26 @@ describe("throttle module", () => {
     assert.strictEqual(remaining.length, 0);
   });
 
+  it("checkThrottle leaves an expired record untouched when another live process holds the lock", () => {
+    const past = new Date(Date.now() - 1000);
+    fs.writeFileSync(throttleFile, JSON.stringify([{
+      type: "claude", command: "claude-flash",
+      startExhausted: new Date(past.getTime() - 60000).toISOString(),
+      endExhausted: past.toISOString(),
+    }]));
+    const lockFile = throttleFile + ".lock";
+    fs.writeFileSync(lockFile, JSON.stringify({
+      pid: process.pid,
+      createdAt: new Date().toISOString(),
+    }));
+
+    const result = checkThrottle("claude", "claude-flash", throttleFile);
+
+    assert.deepStrictEqual(result, { throttled: false });
+    assert.strictEqual(JSON.parse(fs.readFileSync(throttleFile, "utf8")).length, 1);
+    assert.ok(fs.existsSync(lockFile));
+  });
+
   it("recordExhausted writes new record when none exists", () => {
     recordExhausted("claude", "claude-flash", 30, throttleFile);
     const records = JSON.parse(fs.readFileSync(throttleFile, "utf8"));
@@ -140,13 +160,12 @@ describe("throttle module", () => {
     assert.ok(records.length >= 1);
   });
 
-  it("acquireLock: stale lockfile is removed and lock is acquired", () => {
-    // 预埋一个残留 lockfile
+  it("acquireLock recovers a lock owned by a dead process", () => {
     const lockFile = throttleFile + ".lock";
-    fs.writeFileSync(lockFile, "stale");
-    // acquireLock 内部不直接暴露，通过 recordExhausted 触发
-    // 先让 acquireLock 重试 10 次失败（lockfile 存在），然后清除并重试
-    // 验证：最终 recordExhausted 成功写入记录（说明 stale lock 被清除）
+    fs.writeFileSync(lockFile, JSON.stringify({
+      pid: process.pid + 10_000_000,
+      createdAt: new Date().toISOString(),
+    }));
     recordExhausted("claude", "stale-test", 30, throttleFile);
     assert.ok(fs.existsSync(throttleFile), "record should be written after stale lock cleared");
     const records = JSON.parse(fs.readFileSync(throttleFile, "utf8"));
