@@ -2,11 +2,7 @@ const { query } = require("@anthropic-ai/claude-agent-sdk");
 const { createAsyncMessageInput } = require("./create-async-input");
 const { spawn } = require("child_process");
 const log = require("../log");
-
-function splitCommand(cmd) {
-  const parts = cmd.trim().split(/\s+/);
-  return { command: parts[0], args: parts.slice(1) };
-}
+const { splitCommand } = require("../command");
 
 function extractText(events) {
   const parts = [];
@@ -278,4 +274,3 @@ module.exports = {
   removePermissionFlags,
   ensureFlags
 };
-

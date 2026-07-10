@@ -6,11 +6,7 @@ const fs = require("fs");
 const log = require("./log");
 const { LimitMsg, isQuotaExceeded, quotaReasonBrief } = require("./limit-msg");
 const { checkThrottle, recordExhausted, toLocalISOString } = require("./throttle");
-
-function splitCommand(cmd) {
-  const parts = cmd.trim().split(/\s+/);
-  return { command: parts[0], args: parts.slice(1) };
-}
+const { splitCommand } = require("./command");
 
 function which(cmd) {
   const { spawnSync } = require("child_process");
@@ -517,7 +513,7 @@ async function main() {
       const lastEntry = allResults[allResults.length - 1];
       const exitCode = err.message.startsWith("command not found") ? EXIT_COMMAND_NOT_FOUND : EXIT_PROVIDER_ERROR;
       process.stderr.write(buildStderrOutput(agent.commandName, "", lastEntry, exitCode) + "\n");
-      process.exit(exitCode);
+      return exitCode;
     }
 
     let lastResult = null;
@@ -687,7 +683,7 @@ async function main() {
       const lastEntry = allResults[allResults.length - 1];
       const exitCode = lastResult.exitCode || EXIT_OK;
       process.stderr.write(buildStderrOutput(agent.commandName, lastResult.sessionId || session.sessionId, lastEntry, exitCode) + "\n");
-      process.exit(exitCode);
+      return exitCode;
     }
 
     log.error("agent %s failed, %s", agent.commandName,
@@ -704,14 +700,16 @@ async function main() {
   if (!out.endsWith("\n")) process.stdout.write("\n");
   const exitCode = resolveExitCode(lastAgentResult, regex);
   process.stderr.write(buildStderrOutput(lastAgent.commandName, lastAgentResult?.sessionId || "", lastAgentResult, exitCode) + "\n");
-  process.exit(exitCode);
+  return exitCode;
 }
 
 if (require.main === module) {
-  main().catch((err) => {
-    process.stderr.write(`Error: ${err.message}\n`);
-    process.exit(2);
-  });
+  main()
+    .then((exitCode) => { process.exitCode = exitCode; })
+    .catch((err) => {
+      process.stderr.write(`Error: ${err.message}\n`);
+      process.exitCode = 2;
+    });
 }
 
 module.exports = { main, parseArgs, isOutputEmpty, canRetry, buildStderrOutput, collapseBlankLines, retryReason, timeoutReasonBrief, LimitMsg, isQuotaExceeded, quotaReasonBrief, DEFAULT_TIMEOUT, EXIT_OK, EXIT_REGEX_MISMATCH, EXIT_EMPTY_OUTPUT, EXIT_PROVIDER_ERROR, EXIT_TIMEOUT, EXIT_COMMAND_NOT_FOUND, EXIT_EXCLUDE_MATCH, EXIT_QUOTA_EXCEEDED, EXIT_THROTTLE_SKIP };

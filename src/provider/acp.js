@@ -5,6 +5,7 @@ const path = require("path");
 const acp = require("@agentclientprotocol/sdk");
 const log = require("../log");
 const { LimitMsg } = require("../limit-msg");
+const { splitCommand } = require("../command");
 
 const AUTH_PATTERNS = [
   /unauthorized/i,
@@ -107,11 +108,6 @@ class CursorNonInteractiveClient extends NonInteractiveClient {
     log.debug("acp: cursor/generate_image desc=%s",
       (params.description || "(none)").slice(0, 60));
   }
-}
-
-function splitCommand(cmd) {
-  const parts = cmd.trim().split(/\s+/);
-  return { command: parts[0], args: parts.slice(1) };
 }
 
 function which(cmd) {
@@ -286,6 +282,7 @@ async function createSession({ command, timeout, resume, provider = "copilot" })
       closed: false,
     };
   } catch (err) {
+    terminateChild(child);
     const wrapped = wrapAcpError(provider, err, childStderr);
     if (childStderr.trim()) {
       try {
@@ -308,10 +305,10 @@ async function send(session, prompt) {
   log.debug("acp: command=%s args=%j sending prompt=%s", session.cmd, session.args, prompt.slice(0, 80));
 
   const timeoutMs = session.deadline === Infinity
-    ? 0
-    : Math.max(0, session.deadline - Date.now());
+    ? null
+    : session.deadline - Date.now();
 
-  if (timeoutMs < 0) {
+  if (timeoutMs !== null && timeoutMs <= 0) {
     return { stdout: "", stderr: session.childStderr(), sessionId: session.sessionId, exitCode: 1, timedOut: true };
   }
 
@@ -322,13 +319,18 @@ async function send(session, prompt) {
     });
 
     let response;
-    if (timeoutMs > 0) {
-      response = await Promise.race([
-        responsePromise,
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), timeoutMs)
-        ),
-      ]);
+    if (timeoutMs !== null) {
+      let timer;
+      try {
+        response = await Promise.race([
+          responsePromise,
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
     } else {
       response = await responsePromise;
     }
@@ -367,12 +369,14 @@ async function closeSession(session) {
   if (session.closed) return;
   session.closed = true;
   log.debug("acp: closing");
-  try {
-    session.child.kill("SIGTERM");
-  } catch {}
+  terminateChild(session.child);
   setTimeout(() => {
     try { session.child.kill("SIGKILL"); } catch {}
   }, 2000).unref();
+}
+
+function terminateChild(child) {
+  try { child.kill("SIGTERM"); } catch {}
 }
 
 async function run(opts) {
@@ -388,12 +392,17 @@ async function withDeadline(promise, deadline) {
   if (deadline === Infinity) return promise;
   const timeoutMs = Math.max(0, deadline - Date.now());
   if (timeoutMs <= 0) throw new Error("deadline exceeded before request");
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("acp request timed out")), timeoutMs)
-    ),
-  ]);
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("acp request timed out")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 module.exports = {
@@ -408,6 +417,7 @@ module.exports = {
   isAuthError,
   formatAuthHint,
   wrapAcpError,
+  terminateChild,
   NonInteractiveClient,
   CursorNonInteractiveClient,
 };

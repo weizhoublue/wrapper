@@ -1,11 +1,7 @@
 const { spawn } = require("child_process");
 const readline = require("readline");
 const log = require("../log");
-
-function splitCommand(cmd) {
-  const parts = cmd.trim().split(/\s+/);
-  return { command: parts[0], args: parts.slice(1) };
-}
+const { splitCommand } = require("../command");
 
 function which(cmd) {
   const { spawnSync } = require("child_process");

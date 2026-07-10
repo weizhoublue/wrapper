@@ -99,7 +99,10 @@ describe("throttle E2E", () => {
 
   async function runMain(args) {
     process.argv = ["node", "main.js", ...args];
-    try { await main(); } catch (e) {
+    try {
+      const code = await main();
+      if (code !== undefined) exitCode = code;
+    } catch (e) {
       if (!e.message.startsWith("ProcessExited")) throw e;
     }
   }
