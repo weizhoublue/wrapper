@@ -120,17 +120,52 @@ async function send(session, prompt) {
     let childStderr = "";
     let timedOut = false;
     let timer = null;
+    let settled = false;
+
+    function settle(result) {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    }
+
+    function killChild() {
+      try { child.kill("SIGTERM"); } catch {}
+      setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 2000).unref();
+    }
+
+    function drainAndUnref() {
+      try { rl.close(); } catch {}
+      try { child.stdout.destroy(); } catch {}
+      try { child.stderr.destroy(); } catch {}
+      try { child.unref(); } catch {}
+    }
 
     if (session.deadline !== Infinity) {
       const remaining = session.deadline - Date.now();
       if (remaining <= 0) {
-        resolve({ stdout: "", stderr: "", sessionId: session.sessionId, exitCode: 1, timedOut: true });
+        timedOut = true;
+        killChild();
+        child.on("error", () => {});
+        try { child.stdout.destroy(); } catch {}
+        try { child.stderr.destroy(); } catch {}
+        try { child.unref(); } catch {}
+        settle({ stdout: "", stderr: "", sessionId: session.sessionId, exitCode: 1, timedOut: true });
         return;
       }
       timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
-        setTimeout(() => child.kill("SIGKILL"), 2000).unref();
+        killChild();
+        // Resolve immediately. Do NOT wait for child.on("close"): if codex's
+        // tool subprocesses inherited the pipe fd they will keep it open even
+        // after codex is SIGKILL'd, so "close" may never fire.
+        const stdout = extractText(events);
+        const stderr = extractThinking(events) || childStderr.trim();
+        const extractedId = extractSessionId(events);
+        if (extractedId) session.sessionId = extractedId;
+        log.debug("codex: timeout sessionId=%s stdoutLen=%d stderrLen=%d",
+          session.sessionId, stdout.length, stderr.length);
+        drainAndUnref();
+        settle({ stdout, stderr: stderr || undefined, sessionId: session.sessionId, exitCode: 1, timedOut: true });
       }, remaining);
     }
 
@@ -156,8 +191,7 @@ async function send(session, prompt) {
       const finish = () => {
         log.debug("codex: exitCode=%d sessionId=%s stdoutLen=%d stderrLen=%d timedOut=%s",
           exitCode, session.sessionId, stdout.length, stderr.length, timedOut);
-
-        resolve({
+        settle({
           stdout,
           stderr: stderr || undefined,
           sessionId: session.sessionId,
@@ -191,7 +225,7 @@ async function send(session, prompt) {
 
     child.on("error", (err) => {
       if (timer) clearTimeout(timer);
-      reject(err);
+      if (!settled) reject(err);
     });
   });
 }

@@ -230,6 +230,42 @@ describe("agy - send", () => {
   });
 });
 
+describe("agy - send timeout when descendants hold pipe fd", () => {
+  it("resolves timedOut=true without waiting for close event", async () => {
+    // Simulate agy tool subprocesses keeping the pipe fd open after SIGKILL.
+    const killSignals = [];
+    mockSpawnFn = () => {
+      const EventEmitter = require("events");
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter(); // data listener only, no destroy
+      child.stderr = new EventEmitter();
+      child.unref = () => {};
+      child.kill = (signal) => killSignals.push(signal || "SIGTERM");
+      // "close" deliberately never emitted
+      return child;
+    };
+
+    const session = await createSession({ command: "node", timeout: 10 });
+    session.deadline = Date.now() + 150;
+
+    try {
+      const start = Date.now();
+      const result = await send(session, "test prompt");
+      const elapsed = Date.now() - start;
+
+      assert.strictEqual(result.timedOut, true, "should report timedOut");
+      assert.strictEqual(result.exitCode, 1, "exit code should be 1 on timeout");
+      assert.ok(elapsed >= 100, `should wait until deadline, elapsed=${elapsed}ms`);
+      assert.ok(elapsed < 1000, `should not block waiting for close, elapsed=${elapsed}ms`);
+      assert.ok(killSignals.includes("SIGTERM"), "should have sent SIGTERM to child");
+    } finally {
+      mockSpawnFn = null;
+      if (fs.existsSync(session.logPath)) fs.unlinkSync(session.logPath);
+      await closeSession(session);
+    }
+  });
+});
+
 describe("agy - insertConversationBeforePrint", () => {
   it("inserts before --print flag", () => {
     const base = ["--log-file", "/tmp/x.log", "--print"];

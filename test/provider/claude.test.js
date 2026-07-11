@@ -19,7 +19,7 @@ require.cache[sdkPath] = {
 const claudePath = require.resolve("../../src/provider/claude");
 delete require.cache[claudePath];
 
-const { createSession, extractText, extractThinking, extractSessionId, splitCommand, isRootUser, removePermissionFlags, ensureFlags } = require("../../src/provider/claude");
+const { createSession, closeSession, extractText, extractThinking, extractSessionId, splitCommand, isRootUser, removePermissionFlags, ensureFlags } = require("../../src/provider/claude");
 
 describe("Claude provider - extractText", () => {
   it("extracts text from assistant messages", () => {
@@ -278,4 +278,63 @@ describe("Claude provider - createSession", () => {
   });
 });
 
+describe("Claude provider - closeSession", () => {
+  it("does not hang forever when pump never resolves (guards against hung subprocess)", async () => {
+    // claude's closeSession awaits session.pump. If the subprocess is stuck and
+    // q.close() doesn't forcefully kill it, pump hangs forever. The fix caps
+    // the wait at 5 s then force-kills. This test speeds up that guard to 10 ms.
+    const origSetTimeout = global.setTimeout;
+    global.setTimeout = (fn, ms, ...rest) => {
+      if (ms === 5000) return origSetTimeout(fn, 10, ...rest); // 5 s → 10 ms
+      return origSetTimeout(fn, ms, ...rest);
+    };
 
+    const fakeSession = {
+      closed: false,
+      input: { end: () => {} },
+      q: { close: () => {} },
+      childRef: { current: null },
+      pump: new Promise(() => {}), // hangs forever – simulates a stuck subprocess
+    };
+
+    try {
+      const start = Date.now();
+      await closeSession(fakeSession);
+      const elapsed = Date.now() - start;
+
+      assert.strictEqual(fakeSession.closed, true, "session should be marked closed");
+      assert.ok(elapsed < 500, `closeSession should complete quickly, elapsed=${elapsed}ms`);
+    } finally {
+      global.setTimeout = origSetTimeout;
+    }
+  });
+
+  it("force-kills the subprocess after the pump guard fires", async () => {
+    const killSignals = [];
+    const mockChild = { kill: (sig) => killSignals.push(sig || "SIGTERM") };
+
+    const origSetTimeout = global.setTimeout;
+    global.setTimeout = (fn, ms, ...rest) => {
+      if (ms === 5000) return origSetTimeout(fn, 10, ...rest); // 5 s → 10 ms
+      if (ms === 2000) return origSetTimeout(fn, 10, ...rest); // SIGKILL delay → 10 ms
+      return origSetTimeout(fn, ms, ...rest);
+    };
+
+    const fakeSession = {
+      closed: false,
+      input: { end: () => {} },
+      q: { close: () => {} },
+      childRef: { current: mockChild },
+      pump: new Promise(() => {}),
+    };
+
+    try {
+      await closeSession(fakeSession);
+      // Allow the unrefed SIGKILL setTimeout to fire
+      await new Promise((r) => setTimeout(r, 50));
+      assert.ok(killSignals.includes("SIGTERM"), "should SIGTERM the subprocess");
+    } finally {
+      global.setTimeout = origSetTimeout;
+    }
+  });
+});

@@ -29,6 +29,7 @@ function makeMockCodexChild(lines, exitCode = 0) {
   child.stdout = stdoutStream;
   child.stderr = new EventEmitter();
   child.kill = () => {};
+  child.unref = () => {};
   process.nextTick(() => {
     for (const line of lines) {
       stdoutStream.push(line + "\n");
@@ -44,7 +45,13 @@ function resumeIndex(args) {
 }
 
 async function sendWithFastMinWait(session, prompt) {
+  // Speed up the post-exit MIN_WAIT_MS delay so tests don't take 10 s.
+  // Temporarily set deadline to Infinity so the deadline timer is never
+  // registered — otherwise any deadline >= 1000 ms also gets sped up to 0 ms,
+  // causing it to fire before events are processed and breaking session-id tests.
   const origSetTimeout = global.setTimeout;
+  const savedDeadline = session.deadline;
+  session.deadline = Infinity;
   global.setTimeout = (fn, ms, ...rest) => {
     if (ms >= 1000) return origSetTimeout(fn, 0, ...rest);
     return origSetTimeout(fn, ms, ...rest);
@@ -53,6 +60,7 @@ async function sendWithFastMinWait(session, prompt) {
     return await send(session, prompt);
   } finally {
     global.setTimeout = origSetTimeout;
+    session.deadline = savedDeadline;
   }
 }
 
@@ -227,6 +235,42 @@ describe("Codex provider - send retry session continuity", () => {
     }
   });
 
+  it("resolves timedOut=true without waiting for close when descendants hold pipe fd", async () => {
+    // Simulate codex tool subprocesses keeping the pipe fd open after SIGKILL.
+    // Use plain send() — not sendWithFastMinWait — so the deadline timer fires naturally.
+    const killSignals = [];
+    mockSpawnFn = () => {
+      const EventEmitter = require("events");
+      const { Readable } = require("stream");
+      const child = new EventEmitter();
+      const stdoutStream = new Readable({ read() {} }); // never ends
+      child.stdout = stdoutStream;
+      child.stderr = new EventEmitter();
+      child.unref = () => {};
+      child.kill = (signal) => killSignals.push(signal || "SIGTERM");
+      // "close" deliberately never emitted (descendants hold pipe fd)
+      return child;
+    };
+
+    const session = await createSession({ command: "node", timeout: 10 });
+    session.deadline = Date.now() + 150;
+
+    try {
+      const start = Date.now();
+      const result = await send(session, "test prompt"); // plain send, not sendWithFastMinWait
+      const elapsed = Date.now() - start;
+
+      assert.strictEqual(result.timedOut, true, "should report timedOut");
+      assert.strictEqual(result.exitCode, 1, "exit code should be 1 on timeout");
+      assert.ok(elapsed >= 100, `should wait until deadline, elapsed=${elapsed}ms`);
+      assert.ok(elapsed < 1000, `should not block waiting for close, elapsed=${elapsed}ms`);
+      assert.ok(killSignals.includes("SIGTERM"), "should have sent SIGTERM to child");
+    } finally {
+      mockSpawnFn = null;
+      await closeSession(session);
+    }
+  });
+
   it("preserves sessionId after timeout when thread.started was emitted", async () => {
     const session = await createSession({ command: "node", timeout: 10 });
     session.deadline = Date.now() + 50;
@@ -234,23 +278,40 @@ describe("Codex provider - send retry session continuity", () => {
     let spawnCount = 0;
 
     mockSpawnFn = () => {
-      spawnCount++;
+      const spawnNum = ++spawnCount;
       const EventEmitter = require("events");
       const child = new EventEmitter();
       const stdoutStream = new Readable({ read() {} });
       child.stdout = stdoutStream;
       child.stderr = new EventEmitter();
-      child.kill = () => {
-        process.nextTick(() => child.emit("close", null));
-      };
-      process.nextTick(() => {
-        stdoutStream.push(JSON.stringify({ type: "thread.started", thread_id: threadId }) + "\n");
-      });
+      child.unref = () => {};
+
+      if (spawnNum === 1) {
+        // First spawn: close only via kill (triggered by the deadline timer).
+        child.kill = () => {
+          process.nextTick(() => child.emit("close", null));
+        };
+        process.nextTick(() => {
+          stdoutStream.push(JSON.stringify({ type: "thread.started", thread_id: threadId }) + "\n");
+        });
+      } else {
+        // Second spawn: auto-close via stream end + setImmediate so that
+        // sendWithFastMinWait (which disables the deadline timer) can still
+        // complete via the normal close → MIN_WAIT path.
+        child.kill = () => {};
+        process.nextTick(() => {
+          stdoutStream.push(JSON.stringify({ type: "thread.started", thread_id: threadId }) + "\n");
+          stdoutStream.push(null); // end of stream
+          setImmediate(() => child.emit("close", 0));
+        });
+      }
       return child;
     };
 
     try {
-      const first = await sendWithFastMinWait(session, "prompt1");
+      // Use plain send() so the 50 ms deadline fires naturally.
+      // sendWithFastMinWait would set deadline=Infinity and prevent the timeout.
+      const first = await send(session, "prompt1");
       assert.strictEqual(first.timedOut, true);
       assert.strictEqual(session.sessionId, threadId);
 
