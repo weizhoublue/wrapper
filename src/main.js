@@ -189,10 +189,10 @@ async function main() {
           stderr: "",
           sessionId: "",
           throttleSkipped: true,
-          wrapperError: `throttled until ${toLocalISOString(tr.endExhausted)}`,
+          wrapperError: `quota exhausted and agent was throttled until ${toLocalISOString(tr.endExhausted)}`,
         });
         if (agentIdx < opts.agents.length - 1) {
-          log.error("agent %s throttled, falling back to next agent", agent.commandName);
+          log.error("quota exhausted and agent %s throttled, falling back to next agent", agent.commandName);
           continue;
         }
         process.stdout.write("\n");
