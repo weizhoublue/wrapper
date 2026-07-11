@@ -120,13 +120,43 @@ async function send(session, prompt) {
     let childStderr = "";
     let timedOut = false;
     let timer = null;
+    let settled = false;
+
+    function settle(result) {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    }
+
+    function killChild() {
+      try { child.kill("SIGTERM"); } catch {}
+      setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 2000).unref();
+    }
+
+    function cleanupLog() {
+      try {
+        if (fs.existsSync(session.logPath)) fs.unlinkSync(session.logPath);
+      } catch (err) {
+        log.error("agy: failed to delete log file %s: %s", session.logPath, err.message);
+      }
+    }
 
     if (session.deadline !== Infinity) {
       const remaining = session.deadline - Date.now();
       timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
-        setTimeout(() => child.kill("SIGKILL"), 2000).unref();
+        killChild();
+        // Resolve immediately. Do NOT wait for child.on("close"): if agy's
+        // tool subprocesses inherited the pipe fd they will keep it open even
+        // after agy is SIGKILL'd, so "close" may never fire.
+        const sessionId = extractSessionIdFromLog(session.logPath) || session.sessionId;
+        session.sessionId = sessionId;
+        log.debug("agy: timeout sessionId=%s stdoutLen=%d", sessionId, childStdout.length);
+        cleanupLog();
+        try { child.stdout.destroy(); } catch {}
+        try { child.stderr.destroy(); } catch {}
+        try { child.unref(); } catch {}
+        settle({ stdout: childStdout, stderr: childStderr.trim() || undefined, sessionId, exitCode: 1, timedOut: true });
       }, remaining);
     }
 
@@ -138,17 +168,9 @@ async function send(session, prompt) {
 
       const sessionId = extractSessionIdFromLog(session.logPath) || session.sessionId;
       session.sessionId = sessionId;
-      
-      // Clean up the log file
-      try {
-        if (fs.existsSync(session.logPath)) {
-          fs.unlinkSync(session.logPath);
-        }
-      } catch (err) {
-        log.error("agy: failed to delete log file %s: %s", session.logPath, err.message);
-      }
+      cleanupLog();
 
-      resolve({
+      settle({
         stdout: childStdout,
         stderr: childStderr.trim() || undefined,
         sessionId,
@@ -159,12 +181,8 @@ async function send(session, prompt) {
 
     child.on("error", (err) => {
       if (timer) clearTimeout(timer);
-      try {
-        if (fs.existsSync(session.logPath)) {
-          fs.unlinkSync(session.logPath);
-        }
-      } catch {}
-      reject(err);
+      cleanupLog();
+      if (!settled) reject(err);
     });
   });
 }

@@ -295,4 +295,30 @@ describe("ACP - session lifecycle", () => {
     terminateChild({ kill: (signal) => signals.push(signal) });
     assert.deepStrictEqual(signals, ["SIGTERM"]);
   });
+
+  it("kills child process immediately when timeout fires before prompt responds", async () => {
+    // Verify the fix: when a prompt hangs past the deadline the child is
+    // SIGTERM'd so that abandoned responsePromises don't leave a zombie process.
+    const childKillSignals = [];
+    const mockChild = { kill: (sig) => childKillSignals.push(sig || "SIGTERM") };
+
+    const result = await send({
+      closed: false,
+      client: { notifications: [] },
+      deadline: Date.now() + 150,
+      childStderr: () => "",
+      sessionId: "session-kill",
+      provider: "copilot",
+      childExitCode: () => null,
+      child: mockChild,
+      connection: {
+        prompt: () => new Promise(() => {}), // hangs forever
+      },
+    }, "hello");
+
+    assert.strictEqual(result.timedOut, true, "should report timedOut");
+    assert.strictEqual(result.sessionId, "session-kill");
+    assert.ok(childKillSignals.includes("SIGTERM"),
+      `expected SIGTERM on child, got: ${JSON.stringify(childKillSignals)}`);
+  });
 });

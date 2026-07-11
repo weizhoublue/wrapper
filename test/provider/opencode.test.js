@@ -1,7 +1,19 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert");
 const { spawn, spawnSync } = require("child_process");
+const { EventEmitter } = require("events");
+const { Readable } = require("stream");
 const path = require("path");
+
+// Wrap spawn before requiring provider so the provider captures the wrapper.
+const childProcess = require("child_process");
+const originalSpawn = childProcess.spawn;
+let mockSpawnFn = null;
+childProcess.spawn = (...args) => {
+  if (mockSpawnFn) return mockSpawnFn(...args);
+  return originalSpawn(...args);
+};
+
 const {
   ensureFlags,
   extractText,
@@ -9,6 +21,9 @@ const {
   extractSessionId,
   inferExitCode,
   splitCommand,
+  createSession,
+  send,
+  closeSession,
 } = require("../../src/provider/opencode");
 
 describe("opencode ensureFlags", () => {
@@ -78,6 +93,72 @@ describe("opencode splitCommand", () => {
       command: "opencode",
       args: ["run", "--format", "json", "--dangerously-skip-permissions"],
     });
+  });
+});
+
+describe("opencode send - timeout when descendants hold pipe fd", () => {
+  it("resolves timedOut=true without waiting for close event", async () => {
+    // Simulate the scenario where opencode spawns tool subprocesses that
+    // inherit the stdout pipe fd. Even after opencode is SIGKILL'd the
+    // descendants keep the pipe open, so child.on("close") never fires.
+    const killSignals = [];
+    mockSpawnFn = () => {
+      const child = new EventEmitter();
+      const stdoutStream = new Readable({ read() {} }); // never ends
+      child.stdout = stdoutStream;
+      child.stderr = new EventEmitter();
+      child.unref = () => {};
+      child.kill = (signal) => killSignals.push(signal || "SIGTERM");
+      // "close" is deliberately never emitted
+      return child;
+    };
+
+    const session = await createSession({ command: "node", timeout: 10 });
+    session.deadline = Date.now() + 150;
+
+    try {
+      const start = Date.now();
+      const result = await send(session, "test prompt");
+      const elapsed = Date.now() - start;
+
+      assert.strictEqual(result.timedOut, true, "should report timedOut");
+      assert.strictEqual(result.exitCode, 1, "exit code should be 1 on timeout");
+      assert.ok(elapsed >= 100, `should wait until deadline, elapsed=${elapsed}ms`);
+      assert.ok(elapsed < 1000, `should not block waiting for close, elapsed=${elapsed}ms`);
+      assert.ok(killSignals.includes("SIGTERM"), "should have sent SIGTERM to child");
+    } finally {
+      mockSpawnFn = null;
+      await closeSession(session);
+    }
+  });
+
+  it("resolves immediately when deadline is already past at send() call time", async () => {
+    const killSignals = [];
+    mockSpawnFn = () => {
+      const child = new EventEmitter();
+      child.stdout = new Readable({ read() {} });
+      child.stderr = new EventEmitter();
+      child.unref = () => {};
+      child.kill = (signal) => killSignals.push(signal || "SIGTERM");
+      return child;
+    };
+
+    const session = await createSession({ command: "node", timeout: 10 });
+    session.deadline = Date.now() - 1; // already expired
+
+    try {
+      const start = Date.now();
+      const result = await send(session, "test prompt");
+      const elapsed = Date.now() - start;
+
+      assert.strictEqual(result.timedOut, true);
+      assert.strictEqual(result.exitCode, 1);
+      assert.ok(elapsed < 200, `should resolve nearly immediately, elapsed=${elapsed}ms`);
+      assert.ok(killSignals.includes("SIGTERM"), "should have killed the spawned child");
+    } finally {
+      mockSpawnFn = null;
+      await closeSession(session);
+    }
   });
 });
 

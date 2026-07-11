@@ -358,7 +358,12 @@ async function send(session, prompt) {
     };
   } catch (err) {
     if (err.message === "timeout") {
-      log.debug("acp: timeout");
+      log.debug("acp: timeout - killing child process");
+      // The pending responsePromise cannot be cancelled; kill the child so the
+      // process does not linger and so any retry fails fast on a broken pipe
+      // rather than sending a second concurrent prompt on the same connection.
+      terminateChild(session.child);
+      setTimeout(() => { try { session.child.kill("SIGKILL"); } catch {} }, 2000).unref();
       return { stdout: "", stderr: session.childStderr(), sessionId: session.sessionId, exitCode: 1, timedOut: true };
     }
     throw wrapAcpError(session.provider, err, session.childStderr());

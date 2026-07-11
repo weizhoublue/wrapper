@@ -131,16 +131,20 @@ async function createSession({ command, timeout, resume, isCustom }) {
     }
   }
 
-  if (args.length > 0) {
-    sdkOptions.spawnClaudeCodeProcess = (spawnOpts) => {
-      log.debug("spawning: command=%s args=%j", cmd, [...args, ...spawnOpts.args]);
-      return spawn(cmd, [...args, ...spawnOpts.args], {
-        cwd: spawnOpts.cwd,
-        env: spawnOpts.env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-    };
-  }
+  // childRef is a mutable holder so the spawnClaudeCodeProcess callback can
+  // capture the ChildProcess before `session` is declared (avoids TDZ).
+  const childRef = { current: null };
+  sdkOptions.spawnClaudeCodeProcess = (spawnOpts) => {
+    const fullArgs = [...args, ...spawnOpts.args];
+    log.debug("spawning: command=%s args=%j", cmd, fullArgs);
+    const child = spawn(cmd, fullArgs, {
+      cwd: spawnOpts.cwd,
+      env: spawnOpts.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    childRef.current = child;
+    return child;
+  };
 
   log.debug("claude provider: creating session command=%s args=%j", cmd, args);
 
@@ -149,6 +153,7 @@ async function createSession({ command, timeout, resume, isCustom }) {
   const session = {
     input,
     q,
+    childRef,
     events: [],
     sessionId: null,
     cmd,
@@ -225,7 +230,19 @@ async function closeSession(session) {
   log.debug("claude provider: closing session");
   session.input.end();
   session.q?.close?.();
-  try { await session.pump; } catch {}
+  // If the subprocess ignores close() (e.g. hung on network I/O), pump will
+  // never resolve. Cap the wait at 5 s, then force-kill the child process.
+  try {
+    await Promise.race([
+      session.pump,
+      new Promise((resolve) => setTimeout(resolve, 5000)),
+    ]);
+  } catch {}
+  const child = session.childRef?.current;
+  if (child) {
+    try { child.kill("SIGTERM"); } catch {}
+    setTimeout(() => { try { child.kill("SIGKILL"); } catch {} }, 2000).unref();
+  }
 }
 
 async function run(opts) {
