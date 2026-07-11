@@ -10,10 +10,10 @@ Throttle **默认开启**，无需额外参数。
 
 ```bash
 # 默认开启（等效于 --enable-throttle true）
-wrapper -t claude -c "claude-deepseek-flash" -t codex -p "say hi"
+wrapper run -t claude -c "claude-deepseek-flash" -t codex "say hi"
 
 # 关闭 throttle
-wrapper -t claude -c "claude-deepseek-flash" -t codex --enable-throttle false -p "say hi"
+wrapper run -t claude -c "claude-deepseek-flash" -t codex --enable-throttle false "say hi"
 ```
 
 ---
@@ -31,10 +31,10 @@ Throttle 依赖 quota 检测机制（`--quota`）。启用 throttle 时若同时
 
 ```bash
 # 报错退出
-wrapper -t claude -p "hi" --no-quota
+wrapper run -t claude "hi" --no-quota
 
 # 正常：先关闭 throttle，再关闭 quota
-wrapper -t claude -p "hi" --enable-throttle false --no-quota
+wrapper run -t claude "hi" --enable-throttle false --no-quota
 ```
 
 ---
@@ -110,8 +110,8 @@ wrapper 启动
 ### 场景一：多 Agent fallback + throttle
 
 ```bash
-wrapper -t claude -c "claude-deepseek-flash" -t codex -t copilot \
-  --throttle-duration 30 -p "say hi in one word"
+wrapper run -t claude -c "claude-deepseek-flash" -t codex -t copilot \
+  --throttle-duration 30 "say hi in one word"
 ```
 
 **第一次调用：**
@@ -127,7 +127,7 @@ wrapper -t claude -c "claude-deepseek-flash" -t codex -t copilot \
 ### 场景二：所有 Agent 均被 throttle
 
 ```bash
-wrapper -t claude -c "claude-deepseek-flash" -p "say hi"
+wrapper run -t claude -c "claude-deepseek-flash" "say hi"
 ```
 
 若 `claude-deepseek-flash` 处于冷却期：
@@ -160,12 +160,17 @@ exit 207
 
 ## 手动清理
 
-如需立即解除某个 Agent 的 throttle，直接编辑 `~/.wrapper/throttle.json`，删除对应记录即可。
-
 ```bash
-# 查看当前 throttle 状态
-cat ~/.wrapper/throttle.json
+# 查看当前 throttle 状态（推荐）
+wrapper throttle -l
+# 首行为 throttle.json 绝对路径，例如：
+# /Users/you/.wrapper/throttle.json
+# No throttle records.
 
-# 清空所有 throttle 记录
+# 按列表编号删除（1-based）
+wrapper throttle -d 1
+
+# 或直接编辑文件
+cat ~/.wrapper/throttle.json
 echo '[]' > ~/.wrapper/throttle.json
 ```

@@ -34,23 +34,29 @@ wrapper (main.js)                 Claude Agent SDK               Claude CLI
 ## CLI 接口
 
 ```
-wrapper -p <prompt> [-t type [-c command]] [-t type [-c command]] ... [选项]
+wrapper [-h] [-v]
+wrapper run <选项...> <提示词>
+wrapper throttle [-l | -d <id>]
 ```
+
+`run` 子命令：提示词为最后一个参数（不提供 `-p`）。选项与旧版一致：
 
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
-| `-p, --prompt` | 是 | - | 用户提示词 |
-| `-t, --type` | 否 | `claude` | provider 类型：`claude` / `codex` / `copilot` / `gemini` / `cursor` / `opencode`（可多次指定以进行冗余备用调用） |
-| `-c, --command` | 否 | 跟前一个 `-t` 联动 | 实际执行的命令（必须紧跟在 `-t` 之后，且每个 `-t` 最多只能有一个 `-c`） |
+| `<提示词>` | 是 | - | 最后一个 argv token |
+| `-t, --type` | 否 | `claude` | provider 类型（可多次指定 fallback） |
+| `-c, --command` | 否 | 跟前一个 `-t` 联动 | 实际执行的命令（须紧跟 `-t`） |
 | `-d, --debug` | 否 | 关 | 开启日志 |
 | `-e, --reg` | 否 | 空 | 正则匹配模式，不匹配则重试 |
-| `-x, --exclude` | 否 | 空 | 排除正则（仅匹配 stdout），匹配则立即宣告当前 agent 失败且不再重试 |
-| `-q, --quota` | 否 | 开 | 开启 agent 订阅额度耗尽检测 |
-| `-n, --no-quota` | 否 | — | 关闭 agent 订阅额度耗尽检测 |
-| `-r, --retry` | 否 | 2 | 最大重试次数（适用于调用的每一个 Agent） |
-| `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 时可用） |
-| `-o, --timeout` | 否 | 3600（1 小时） | 单次 attempt 超时秒数；`0` 表示不限时 |
-| `-h, --help` | 否 | - | 显示中文帮助信息 |
+| `-x, --exclude` | 否 | 空 | 排除正则（仅 stdout），匹配则失败不重试 |
+| `-q, --quota` | 否 | 开 | 开启 quota 检测 |
+| `-n, --no-quota` | 否 | — | 关闭 quota 检测 |
+| `-r, --retry` | 否 | 2 | 最大重试次数 |
+| `-s, --resume` | 否 | 空 | 恢复 session（与多 Agent 互斥） |
+| `-o, --timeout` | 否 | 3600 | 单次 attempt 超时秒数；`0` 不限时 |
+| `-h, --help` | 否 | - | run 子命令帮助 |
+
+`throttle` 子命令：`-l` 列表、`-d <id>` 按 1-based 编号删除（见 `docs/throttle.md`）。
 
 ## 输出规范
 
@@ -153,7 +159,7 @@ Copilot / Gemini / Cursor 不使用 `--resume` CLI flag（该 flag 仅在交互�
 ## 冗余 Fallback 机制
 
 ### 机制说明
-支持多次指定 `-t` 及紧跟其后的 `-c`。例如：`wrapper -t copilot -t codex -p "hello"`。
+支持多次指定 `-t` 及紧跟其后的 `-c`。例如：`wrapper run -t copilot -t codex "hello"`。
 1. **顺序尝试**：从第一个指定的 Agent 开始，依次尝试。
 2. **提前终止**：一旦某一个 Agent 满足成功条件（非空且匹配正则），则直接退出，后续的 Agent 将不被调用。
 3. **依次 fallback**：若当前 Agent 失败（包括会话创建失败、发送失败、超时、非零退出码、订阅额度耗尽、排除正则匹配或重试耗尽），则记录当前 Agent 的输出/错误后，落入下一个 Agent 重新尝试整个重试循环。

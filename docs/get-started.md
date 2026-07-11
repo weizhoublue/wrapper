@@ -12,51 +12,57 @@ make build          # 构建 4 平台二进制到 dist/
 ## 基本用法
 
 ```bash
-# 发送 prompt (默认使用 claude)
-node src/main.js -p "分析项目架构"
+# 发送 prompt（默认 claude）；提示词为最后一个参数
+node src/main.js run "分析项目架构"
 
 # 自定义命令 (必须紧跟在 -t 之后)
-node src/main.js -t claude -c "claude-free-remote" -p "hello"
+node src/main.js run -t claude -c "claude-free-remote" "hello"
 
 # 多 Agent 冗余调用
-node src/main.js -t copilot -t codex -p "say hi in one word"
+node src/main.js run -t copilot -t codex "say hi in one word"
 
 # 多 Agent 自定义命令调用
-node src/main.js -t claude -c "claude-deepseek" -t claude -c "claude-deepseek-flash" -p "hello"
+node src/main.js run -t claude -c "claude-deepseek" -t claude -c "claude-deepseek-flash" "hello"
 
 # 恢复会话 (仅支持单 Agent)
-node src/main.js -t claude -s <session-id> -p "continue"
+node src/main.js run -t claude -s <session-id> "continue"
 
 # 开启 debug 日志
-node src/main.js -p "hello" -d
+node src/main.js run -d "hello"
 
-# 正则匹配 + 重试（调用的每个 Agent 均会在此条件下进行重试）
-node src/main.js -p "运行测试" -e "PASS" -r 5
+# 正则匹配 + 重试
+node src/main.js run -e "PASS" -r 5 "运行测试"
 
-# 排除正则：stdout 命中则立即失败当前 agent（不重试），可配合 fallback
-node src/main.js -t claude -t codex -p "hello" -x "usage limit|error"
+# 排除正则
+node src/main.js run -t claude -t codex -x "usage limit|error" "hello"
 
 # 超时控制
-node src/main.js -p "长任务" -o 30
+node src/main.js run -o 30 "长任务"
 
-# 查看帮助 (中文帮助信息)
-node src/main.js -h
+# throttle 管理
+node src/main.js throttle -l
+node src/main.js throttle -d 1
+
+# 帮助
+node src/main.js -h              # 顶层子命令
+node src/main.js run -h          # run 选项
+node src/main.js throttle -h     # throttle 选项
 ```
 
-## CLI 参数
+## CLI 参数（`wrapper run`）
 
 | 参数 | 必填 | 默认值 | 说明 |
 |------|:----:|--------|------|
-| `-p, --prompt` | 是 | - | 用户提示词 |
-| `-t, --type` | 否 | `claude` | provider 类型：claude / codex / copilot / gemini / cursor / opencode（可指定多次以实现冗余调用） |
-| `-c, --command` | 否 | 跟 `-t` 联动 | 实际执行的命令（必须紧随在 `-t` 之后且每个 `-t` 仅限一个 `-c`） |
-| `-d, --debug` | 否 | 关 | 开启日志（所有级别输出到 stderr） |
-| `-e, --reg` | 否 | 空 | 正则匹配模式，不匹配则重试 |
-| `-x, --exclude` | 否 | 空 | 排除正则（仅匹配 stdout），匹配则立即宣告当前 agent 失败且不再重试 |
-| `-r, --retry` | 否 | 2 | 最大重试次数（适用于调用的每一个 Agent） |
-| `-s, --resume` | 否 | 空 | 恢复已有 session ID（与多 Agent 互斥，仅单 Agent 可用） |
-| `-o, --timeout` | 否 | 3600（1 小时） | 单次 attempt 超时秒数；`0` 表示不限时 |
-| `-h, --help` | 否 | - | 输出中文帮助信息 |
+| `<提示词>` | 是 | - | **最后一个** argv token（无 `-p`） |
+| `-t, --type` | 否 | `claude` | provider 类型（可多次冗余调用） |
+| `-c, --command` | 否 | 跟 `-t` 联动 | 实际命令（须紧跟 `-t`） |
+| `-d, --debug` | 否 | 关 | 开启日志 |
+| `-e, --reg` | 否 | 空 | 正则不匹配则重试 |
+| `-x, --exclude` | 否 | 空 | stdout 命中则失败不重试 |
+| `-r, --retry` | 否 | 2 | 最大重试次数 |
+| `-s, --resume` | 否 | 空 | 恢复 session（与多 Agent 互斥） |
+| `-o, --timeout` | 否 | 3600 | 单次 attempt 超时；`0` 不限时 |
+| `-h, --help` | 否 | - | run 子命令帮助 |
 
 ## 输出
 
@@ -71,7 +77,7 @@ node src/main.js -h
 ### 基本调用并提取 session ID
 
 ```bash
-node src/main.js -p "say hi" 2>/tmp/sid
+node src/main.js run "say hi" 2>/tmp/sid
 session=$(tail -1 /tmp/sid)
 ```
 
@@ -81,29 +87,29 @@ session=$(tail -1 /tmp/sid)
 
 ```bash
 # 先获取 session ID（stderr 最后一行）
-node src/main.js -p "say hi" 2>/tmp/sid
+node src/main.js run "say hi" 2>/tmp/sid
 session=$(tail -1 /tmp/sid)
 
 # Codex（内部执行 codex exec resume <id>）
-node src/main.js -t codex -s ${session} -p "继续上次对话"
+node src/main.js -t codex -s ${session} "继续上次对话"
 
 # Claude（内部追加 --resume <id> flag）
-node src/main.js -t claude -c 'claude-free-remote' -s ${session} -p "继续上次对话"
+node src/main.js -t claude -c 'claude-free-remote' -s ${session} "继续上次对话"
 
 # Copilot（内部使用 ACP session/load 协议）
-node src/main.js -t copilot -s ${session} -p "继续上次对话"
+node src/main.js -t copilot -s ${session} "继续上次对话"
 
 # Gemini（内部使用 ACP session/load 协议）
-node src/main.js -t gemini -s ${session} -p "继续上次对话"
+node src/main.js -t gemini -s ${session} "继续上次对话"
 
 # Cursor（内部使用 ACP session/load 协议）
-node src/main.js -t cursor -s ${session} -p "继续上次对话"
+node src/main.js -t cursor -s ${session} "继续上次对话"
 ```
 
 ### 正则匹配 + 重试
 
 ```bash
-node src/main.js -p "运行测试" -e "PASS" -r 3
+node src/main.js run "运行测试" -e "PASS" -r 3
 # 重试日志会显示具体原因：regex /PASS/ not matched, output: ...
 # 退出码 200 表示正则匹配耗尽
 ```
@@ -127,7 +133,7 @@ all 3 attempts exhausted: regex /bad/ not matched
 ### 调试
 
 ```bash
-node src/main.js -p "hello" -d
+node src/main.js run "hello" -d
 # -d 输出所有日志到 stderr：attempt 进度、session ID、retry 原因
 ```
 
@@ -152,25 +158,25 @@ node src/main.js -p "hello" -d
 
 ```bash
 # 基本调用（自动注入 --yolo --approve-mcps acp）
-node src/main.js -t cursor -p "say hi in one word"
+node src/main.js -t cursor "say hi in one word"
 
 # 提取 session ID 并恢复会话
-node src/main.js -t cursor -p "tomorrow will rain" 2>/tmp/sid
+node src/main.js -t cursor "tomorrow will rain" 2>/tmp/sid
 session=$(tail -1 /tmp/sid)
-node src/main.js -t cursor -s "$session" -p "what did I say earlier?"
+node src/main.js -t cursor -s "$session" "what did I say earlier?"
 
 # 自定义可执行文件（ensureFlags 仍会补全缺失 flag）
-node src/main.js -t cursor -c "cursor-agent" -p "refactor src/foo.js"
+node src/main.js -t cursor -c "cursor-agent" "refactor src/foo.js"
 ```
 
 ### OpenCode 快速示例
 
 ```bash
-node src/main.js -t opencode -p "say hi in one word"
+node src/main.js -t opencode "say hi in one word"
 
-node src/main.js -t opencode -p "tomorrow will rain" 2>/tmp/sid
+node src/main.js -t opencode "tomorrow will rain" 2>/tmp/sid
 session=$(tail -1 /tmp/sid)
-node src/main.js -t opencode -s "$session" -p "what did I say earlier?"
+node src/main.js -t opencode -s "$session" "what did I say earlier?"
 ```
 
 ## 依赖

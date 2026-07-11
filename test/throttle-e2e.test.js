@@ -103,14 +103,20 @@ describe("throttle E2E", () => {
       const code = await main();
       if (code !== undefined) exitCode = code;
     } catch (e) {
-      if (!e.message.startsWith("ProcessExited")) throw e;
+      if (e.message.startsWith("ProcessExited")) return;
+      if (e.message.includes("wrapper now uses subcommands")) {
+        exitCode = 2;
+        stderrData += e.message + "\n";
+        return;
+      }
+      throw e;
     }
   }
 
   // ── Tests ────────────────────────────────────────────────────────
 
   it("throttle is on by default and does not interfere when no quota exhausted", async () => {
-    await runMain(["-t", "claude", "-c", "claude-flash", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "hi"]);
     assert.strictEqual(exitCode, EXIT_OK);
     assert.ok(stdoutData.includes("mock-stdout-claude"));
     assert.ok(!fs.existsSync(throttleFile));
@@ -123,7 +129,7 @@ describe("throttle E2E", () => {
       startExhausted: new Date().toISOString(),
       endExhausted: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     }]));
-    await runMain(["-t", "claude", "-c", "claude-flash", "--enable-throttle", "false", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "--enable-throttle", "false", "hi"]);
     // should call the agent normally (mock returns success)
     assert.strictEqual(exitCode, EXIT_OK);
   });
@@ -134,7 +140,7 @@ describe("throttle E2E", () => {
       startExhausted: new Date().toISOString(),
       endExhausted: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     }]));
-    await runMain(["-t", "claude", "-c", "claude-flash", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "hi"]);
     assert.strictEqual(exitCode, EXIT_THROTTLE_SKIP);
     assert.ok(stderrData.includes("throttled"));
   });
@@ -145,7 +151,7 @@ describe("throttle E2E", () => {
       startExhausted: new Date().toISOString(),
       endExhausted: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     }]));
-    await runMain(["-t", "claude", "-c", "claude-flash", "-t", "codex", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "-t", "codex", "hi"]);
     assert.strictEqual(exitCode, EXIT_OK);
     assert.ok(stdoutData.includes("mock-stdout-codex"));
   });
@@ -159,7 +165,7 @@ describe("throttle E2E", () => {
         startExhausted: new Date().toISOString(),
         endExhausted: new Date(Date.now() + 30 * 60 * 1000).toISOString() },
     ]));
-    await runMain(["-t", "claude", "-c", "claude-flash", "-t", "codex", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "-t", "codex", "hi"]);
     assert.strictEqual(exitCode, EXIT_THROTTLE_SKIP);
   });
 
@@ -169,7 +175,7 @@ describe("throttle E2E", () => {
       stderr: "",
       exitCode: 1,
     });
-    await runMain(["-t", "claude", "-c", "claude-flash", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "hi"]);
     assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
     assert.ok(fs.existsSync(throttleFile));
     const records = JSON.parse(fs.readFileSync(throttleFile, "utf8"));
@@ -185,7 +191,7 @@ describe("throttle E2E", () => {
       stderr: "",
       exitCode: 1,
     });
-    await runMain(["-t", "claude", "-c", "claude-flash", "--enable-throttle", "false", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "--enable-throttle", "false", "hi"]);
     // quota exhausted exit code (206 or similar) but no throttle file written
     assert.ok(!fs.existsSync(throttleFile));
   });
@@ -197,7 +203,7 @@ describe("throttle E2E", () => {
       startExhausted: new Date(Date.now() - 60000).toISOString(),
       endExhausted: new Date(Date.now() - 1000).toISOString(),
     }]));
-    await runMain(["-t", "claude", "-c", "claude-flash", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "hi"]);
     assert.strictEqual(exitCode, EXIT_OK);
     assert.ok(stdoutData.includes("mock-stdout-claude"));
     // expired record should be removed
@@ -211,7 +217,7 @@ describe("throttle E2E", () => {
       stderr: "",
       exitCode: 1,
     });
-    await runMain(["-t", "claude", "-c", "claude-flash", "--throttle-duration", "60", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "--throttle-duration", "60", "hi"]);
     const records = JSON.parse(fs.readFileSync(throttleFile, "utf8"));
     const diffMin = (new Date(records[0].endExhausted) - new Date(records[0].startExhausted)) / 60000;
     assert.ok(diffMin >= 59.9 && diffMin <= 60.1);
@@ -224,7 +230,41 @@ describe("throttle E2E", () => {
       exitCode: 1,
     });
     log.setDebug(true);
-    await runMain(["-t", "claude", "-c", "claude-flash", "-p", "hi"]);
+    await runMain(["run", "-t", "claude", "-c", "claude-flash", "hi"]);
     assert.ok(stderrData.includes("throttle") || stderrData.includes("throttled"));
+  });
+
+  it("E2: legacy -p argv returns migration error exit 2", async () => {
+    await runMain(["-p", "hi"]);
+    assert.strictEqual(exitCode, 2);
+    assert.match(stderrData, /wrapper run/i);
+  });
+
+  it("E3: spawn throttle list, delete, list end-to-end", () => {
+    const { spawnSync } = require("child_process");
+    const mainJs = path.join(__dirname, "..", "src", "main.js");
+    const env = { ...process.env, WRAPPER_CONFIG_DIR: tmpDir };
+    const records = [
+      { type: "claude", command: "claude-flash", startExhausted: "a", endExhausted: "b" },
+      { type: "codex", command: null, startExhausted: "c", endExhausted: "d" },
+    ];
+    fs.writeFileSync(throttleFile, JSON.stringify(records));
+
+    const list1 = spawnSync("node", [mainJs, "throttle", "-l"], { encoding: "utf8", env });
+    assert.strictEqual(list1.status, 0);
+    assert.match(list1.stdout, /type=claude/);
+    assert.match(list1.stdout, /type=codex/);
+
+    const del = spawnSync("node", [mainJs, "throttle", "-d", "1"], { encoding: "utf8", env });
+    assert.strictEqual(del.status, 0);
+
+    const list2 = spawnSync("node", [mainJs, "throttle", "-l"], { encoding: "utf8", env });
+    assert.strictEqual(list2.status, 0);
+    assert.match(list2.stdout, /type=codex/);
+    assert.doesNotMatch(list2.stdout, /type=claude/);
+    const lines = list2.stdout.trimEnd().split("\n");
+    assert.strictEqual(lines.length, 2);
+    assert.strictEqual(lines[0], path.resolve(throttleFile));
+    assert.match(lines[1], /^1  type=codex/);
   });
 });

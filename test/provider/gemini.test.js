@@ -42,7 +42,7 @@ function lastLine(text) {
 
 describe("gemini provider smoke", () => {
   it("starts and completes a simple prompt", { skip: !hasGemini }, async () => {
-    const result = await runCommu(["-t", "gemini", "-p", "say hi in one word", "-d"]);
+    const result = await runCommu(["run", "-t", "gemini", "-d", "say hi in one word"]);
     assert.strictEqual(result.code, 0);
     assert.ok(result.stdout.trim().length > 0, "has stdout");
     const ids = extractSessionIds(result.stderr);
@@ -50,15 +50,15 @@ describe("gemini provider smoke", () => {
   });
 
   it("accepts custom command", { skip: !hasGemini }, async () => {
-    const result = await runCommu(["-t", "gemini", "-c", "gemini", "-p", "say yes", "-d"]);
+    const result = await runCommu(["run", "-t", "gemini", "-c", "gemini", "-d", "say yes"]);
     assert.strictEqual(result.code, 0);
   });
 
   it("retry attempts reuse the same session id", { skip: !hasGemini }, async () => {
     const result = await runCommu([
-      "-t", "gemini", "-d", "-r", "1",
+      "run", "-t", "gemini", "-d", "-r", "1",
       "-e", "no_bingo",
-      "-p", "say hi in one word ? reply me in english",
+      "say hi in one word ? reply me in english",
     ]);
     const ids = extractSessionIds(result.stderr);
     assert.ok(ids.length >= 2, `expected >=2 attempts, got ${ids.length}`);
@@ -69,12 +69,12 @@ describe("gemini provider smoke", () => {
 
   it("resume preserves session id across invocations", { skip: !hasGemini }, async () => {
     // First call: create a session with context
-    const first = await runCommu(["-t", "gemini", "-d", "-p", "my name is Alice, remember it"]);
+    const first = await runCommu(["run", "-t", "gemini", "-d", "my name is Alice, remember it"]);
     const sid1 = lastLine(first.stderr);
     assert.ok(sid1.length > 0, "first call has session id");
 
     // Second call: resume the same session
-    const second = await runCommu(["-t", "gemini", "-d", "-s", sid1, "-p", "what is my name?"]);
+    const second = await runCommu(["run", "-t", "gemini", "-d", "-s", sid1, "what is my name?"]);
     const sid2 = lastLine(second.stderr);
 
     assert.strictEqual(sid2, sid1,

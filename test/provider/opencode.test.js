@@ -193,7 +193,7 @@ function lastLine(text) {
 
 describe("opencode provider smoke", () => {
   it("completes a simple prompt", { skip: !runOpencodeSmoke }, async () => {
-    const result = await runWrapper(["-t", "opencode", "-p", "say hi in one word", "-d"]);
+    const result = await runWrapper(["run", "-t", "opencode", "-d", "say hi in one word"]);
     assert.strictEqual(result.code, 0);
     assert.ok(result.stdout.trim().length > 0);
     const sid = lastLine(result.stderr);
@@ -201,11 +201,11 @@ describe("opencode provider smoke", () => {
   });
 
   it("resume preserves session across invocations", { skip: !runOpencodeSmoke }, async () => {
-    const first = await runWrapper(["-t", "opencode", "-d", "-p", "my name is Bob, remember it"]);
+    const first = await runWrapper(["run", "-t", "opencode", "-d", "my name is Bob, remember it"]);
     const sid1 = lastLine(first.stderr);
     assert.match(sid1, /^ses_/);
 
-    const second = await runWrapper(["-t", "opencode", "-d", "-s", sid1, "-p", "what is my name?"]);
+    const second = await runWrapper(["run", "-t", "opencode", "-d", "-s", sid1, "what is my name?"]);
     assert.strictEqual(lastLine(second.stderr), sid1);
     assert.ok(second.stdout.toLowerCase().includes("bob"),
       `expected context recall, got: ${second.stdout.slice(0, 200)}`);
