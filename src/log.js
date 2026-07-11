@@ -54,6 +54,7 @@ function debug(format, ...args) {
   write("debug", format, ...args);
 }
 function warn(format, ...args) {
+  if (!debugEnabled) return;
   write("warning", format, ...args);
 }
 function setDebug(v) { debugEnabled = v; }

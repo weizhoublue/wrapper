@@ -182,7 +182,7 @@ async function main() {
       const throttleCommand = agent.isCustom ? agent.command : null;
       const tr = checkThrottle(agent.type, throttleCommand, throttleFile);
       if (tr.throttled) {
-        log.warn("agent %s is throttled until %s, skipping", agent.commandName, toLocalISOString(tr.endExhausted));
+        log.error("agent %s is throttled until %s, skipping", agent.commandName, toLocalISOString(tr.endExhausted));
         allResults.push({
           commandName: agent.commandName,
           stdout: "",

@@ -132,7 +132,7 @@ for each agent:
   if opts.throttle:
     result = checkThrottle(agent.type, agent.command, throttleFile)
     if result.throttled:
-      log.warn("agent %s is throttled until %s, skipping", agent.commandName, result.endExhausted)
+      log.error("agent %s is throttled until %s, skipping", agent.commandName, result.endExhausted)
       allResults.push({ ..., throttleSkipped: true, wrapperError: "throttled until <time>" })
       if 还有下一个 agent:
         continue   // fallback 到下一个
@@ -146,7 +146,7 @@ for each agent:
 // 现有逻辑：isQuotaExceeded() → true
 if opts.throttle:
   recordExhausted(agent.type, agent.command, opts.throttleDuration, throttleFile)
-  log.warn("agent %s quota exhausted, throttled for %d min until %s", ...)
+  log.error("agent %s quota exhausted, throttled for %d min until %s", ...)
 // 继续原有 fallback 逻辑（不变）
 ```
 
