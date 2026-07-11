@@ -413,6 +413,20 @@ describe("isQuotaExceeded", () => {
     );
   });
 
+  it("matches opencode 'usage limit reached' in stderr", () => {
+    assert.strictEqual(
+      isQuotaExceeded("opencode", "", "usage limit reached"),
+      true,
+    );
+  });
+
+  it("matches opencode 'usage limit reached' in stdout", () => {
+    assert.strictEqual(
+      isQuotaExceeded("opencode", "usage limit reached", ""),
+      true,
+    );
+  });
+
   it("returns false for opencode when quota text does not match", () => {
     assert.strictEqual(
       isQuotaExceeded("opencode", "", "rate limited"),
