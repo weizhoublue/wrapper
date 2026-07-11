@@ -198,4 +198,35 @@ function recordExhausted(type, command, durationMinutes, throttleFile) {
   }
 }
 
-module.exports = { checkThrottle, recordExhausted, toLocalISOString };
+function listRecords(throttleFile) {
+  return readRecords(throttleFile);
+}
+
+function deleteRecordByIndex(throttleFile, id) {
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId) || numericId < 1) {
+    throw new Error(`no throttle record with id ${id}`);
+  }
+
+  const lockFile = throttleFile + ".lock";
+  const locked = acquireLock(lockFile);
+  if (!locked) {
+    throw new Error("failed to acquire throttle lock");
+  }
+  try {
+    const records = readRecords(throttleFile);
+    if (numericId > records.length) {
+      throw new Error(`no throttle record with id ${id}`);
+    }
+    const [deleted] = records.splice(numericId - 1, 1);
+    writeRecords(throttleFile, records);
+    return deleted;
+  } finally {
+    releaseLock(lockFile);
+  }
+}
+
+module.exports = {
+  checkThrottle, recordExhausted, toLocalISOString,
+  listRecords, deleteRecordByIndex,
+};

@@ -31,19 +31,19 @@ function runCommu(args = []) {
 
 describe("wrapper smoke", () => {
   it("starts and completes a simple prompt", { skip: !hasClaude }, async () => {
-    const result = await runCommu(["-p", "say hi in one word"]);
+    const result = await runCommu(["run", "say hi in one word"]);
     assert.strictEqual(result.code, 0);
     assert.ok(result.stdout.length > 0, "has stdout");
     assert.ok(result.stderr.length > 0, "has session id in stderr");
   });
 
   it("accepts custom command", { skip: !hasClaude }, async () => {
-    const result = await runCommu(["-t", "claude", "-c", "claude", "-p", "say yes"]);
+    const result = await runCommu(["run", "-t", "claude", "-c", "claude", "say yes"]);
     assert.strictEqual(result.code, 0);
   });
 
   it("debug flag enables debug output", { skip: !hasClaude }, async () => {
-    const result = await runCommu(["-p", "say no", "-d"]);
+    const result = await runCommu(["run", "-d", "say no"]);
     assert.ok(result.stderr.includes("[wrapper]") && /\[wrapper\]\[\d{6}\]\[debug\]/.test(result.stderr), "has debug log in stderr");
     assert.match(
       result.stderr,
@@ -53,7 +53,18 @@ describe("wrapper smoke", () => {
   });
 
   it("retry on regex mismatch", { skip: !hasClaude }, async () => {
-    const result = await runCommu(["-p", "say hi in one word", "-e", "ZZZZNOMATCHZZZ", "-r", "1"]);
+    const result = await runCommu(["run", "-e", "ZZZZNOMATCHZZZ", "-r", "1", "say hi in one word"]);
     assert.notStrictEqual(result.code, 0);
+  });
+
+  it("rejects legacy -p argv with migration error", async () => {
+    const result = await runCommu(["-p", "hi"]);
+    assert.strictEqual(result.code, 2);
+    assert.match(result.stderr, /wrapper run/i);
+  });
+
+  it("throttle list exits 0 without real agent", async () => {
+    const result = await runCommu(["throttle", "-l"]);
+    assert.strictEqual(result.code, 0);
   });
 });

@@ -133,7 +133,7 @@ describe("multi-agent fallback E2E", () => {
   }
 
   it("returns a successful exit code without terminating the process", async () => {
-    process.argv = ["node", "main.js", "-t", "claude", "-p", "hello"];
+    process.argv = ["node", "main.js", "run", "-t", "claude", "hello"];
 
     const code = await main();
 
@@ -148,7 +148,7 @@ describe("multi-agent fallback E2E", () => {
       return { sessionId: "copilot-session" };
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, 0);
     assert.ok(stdoutData.includes("mock-stdout-claude"));
@@ -163,7 +163,7 @@ describe("multi-agent fallback E2E", () => {
       throw new Error("command not found: claude");
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, 0);
     assert.ok(stdoutData.includes("mock-stdout-copilot"));
@@ -177,7 +177,7 @@ describe("multi-agent fallback E2E", () => {
       throw new Error("send error");
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, 0);
     assert.ok(stdoutData.includes("mock-stdout-copilot"));
@@ -191,7 +191,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "timeout output", stderr: "timeout stderr", sessionId: session.sessionId, exitCode: 1, timedOut: true };
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, 0);
     assert.ok(stdoutData.includes("mock-stdout-copilot"));
@@ -206,7 +206,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "fail output", stderr: "fail stderr", sessionId: session.sessionId, exitCode: 5, timedOut: false };
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, 0);
     assert.ok(stdoutData.includes("mock-stdout-copilot"));
@@ -224,7 +224,7 @@ describe("multi-agent fallback E2E", () => {
       throw new Error("session failed");
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_PROVIDER_ERROR);
     assert.ok(!stderrData.includes("[claude] error:"));
@@ -241,7 +241,7 @@ describe("multi-agent fallback E2E", () => {
       throw new Error("send fail 2");
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_PROVIDER_ERROR);
     assert.ok(!stderrData.includes("[claude] error:"));
@@ -258,7 +258,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "out 2", stderr: "err 2", sessionId: session.sessionId, exitCode: 1, timedOut: true };
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_TIMEOUT);
     assert.ok(stdoutData.includes("out 2"));
@@ -270,7 +270,7 @@ describe("multi-agent fallback E2E", () => {
   });
 
   it("unknown provider type prints error and exits with provider error code", async () => {
-    await runMain(["-t", "nonexistent", "-p", "hello"]);
+    await runMain(["run", "-t", "nonexistent", "hello"]);
     assert.strictEqual(exitCode, EXIT_PROVIDER_ERROR);
     assert.ok(stderrData.includes("Error: unknown provider type: nonexistent"));
   });
@@ -283,7 +283,7 @@ describe("multi-agent fallback E2E", () => {
       stdout: "from opencode", stderr: "", sessionId: "ses_mock", exitCode: 0,
     });
 
-    await runMain(["-t", "claude", "-t", "opencode", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "-t", "opencode", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_OK);
     assert.ok(stdoutData.includes("from opencode"));
@@ -295,7 +295,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "Hi", stderr: "", sessionId: "claude-session", exitCode: 0 };
     };
 
-    await runMain(["-t", "claude", "-p", "hello", "-e", "hi"]);
+    await runMain(["run", "-t", "claude", "-e", "hi", "hello"]);
 
     assert.strictEqual(exitCode, 0);
     assert.ok(stdoutData.includes("Hi"));
@@ -308,7 +308,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "not matching", stderr: "", sessionId: "claude-session", exitCode: 0 };
     };
 
-    await runMain(["-t", "claude", "-p", "hello", "-e", "match_nothing", "-r", "3"]);
+    await runMain(["run", "-t", "claude", "-e", "match_nothing", "-r", "3", "hello"]);
 
     assert.strictEqual(attempts, 3);
   });
@@ -320,7 +320,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "", stderr: "", sessionId: "claude-session", exitCode: 1, timedOut: true };
     };
 
-    await runMain(["-t", "claude", "-p", "hello", "-r", "3", "-o", "1"]);
+    await runMain(["run", "-t", "claude", "-r", "3", "-o", "1", "hello"]);
 
     assert.strictEqual(attempts, 3);
     assert.strictEqual(exitCode, EXIT_TIMEOUT);
@@ -337,7 +337,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "ok", stderr: "", sessionId: "claude-session", exitCode: 0, timedOut: false };
     };
 
-    await runMain(["-t", "claude", "-p", "hello", "-r", "3", "-o", "1"]);
+    await runMain(["run", "-t", "claude", "-r", "3", "-o", "1", "hello"]);
 
     assert.strictEqual(attempts, 2);
     assert.strictEqual(exitCode, EXIT_OK);
@@ -352,7 +352,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "correct", stderr: "", sessionId: "copilot-session", exitCode: 0 };
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello", "-e", "correct", "-r", "2", "-d"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "-e", "correct", "-r", "2", "-d", "hello"]);
 
     assert.ok(/\[wrapper\]\[\d{6}\]\[error\]/.test(stderrData), "Should print error level logs");
     assert.ok(stderrData.includes("retry needed"), "Should log retry needed");
@@ -369,7 +369,7 @@ describe("multi-agent fallback E2E", () => {
       };
     };
 
-    await runMain(["-t", "claude", "-p", "hello", "-d"]);
+    await runMain(["run", "-t", "claude", "-d", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_OK);
     assert.ok(
@@ -391,7 +391,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "Hello!", stderr: "", sessionId: "claude-session", exitCode: 0 };
     };
 
-    await runMain(["-t", "claude", "-p", "hello", "-e", "bad", "-r", "2"]);
+    await runMain(["run", "-t", "claude", "-e", "bad", "-r", "2", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_REGEX_MISMATCH);
     assert.ok(!stderrData.includes("[claude] stdout:"));
@@ -409,7 +409,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "fatal error block", stderr: "", sessionId: "claude-session", exitCode: 0 };
     };
 
-    await runMain(["-t", "claude", "-p", "hello", "-x", "fatal error", "-r", "3"]);
+    await runMain(["run", "-t", "claude", "-x", "fatal error", "-r", "3", "hello"]);
 
     assert.strictEqual(attempts, 1);
     assert.strictEqual(exitCode, EXIT_EXCLUDE_MATCH);
@@ -427,7 +427,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "all fine", stderr: "", sessionId: "copilot-session", exitCode: 0 };
     };
 
-    await runMain(["-t", "claude", "-t", "copilot", "-p", "hello", "-x", "fatal error"]);
+    await runMain(["run", "-t", "claude", "-t", "copilot", "-x", "fatal error", "hello"]);
 
     assert.strictEqual(exitCode, 0);
     assert.strictEqual(copilotCalled, true);
@@ -442,7 +442,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "codex", "-p", "hello"]);
+    await runMain(["run", "-t", "codex", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
     assert.ok(stderrData.includes("[codex] error:"));
@@ -457,7 +457,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
     assert.ok(stderrData.includes("[copilot] error:"));
@@ -472,7 +472,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 0,
     });
 
-    await runMain(["-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, 0);
     assert.ok(!stderrData.includes("quota exceeded"));
@@ -486,7 +486,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "gemini", "-p", "hello"]);
+    await runMain(["run", "-t", "gemini", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
     assert.ok(stderrData.includes("[gemini] error:"));
@@ -501,7 +501,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "claude", "-p", "hello"]);
+    await runMain(["run", "-t", "claude", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
     assert.ok(stderrData.includes("[claude] error:"));
@@ -516,7 +516,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "opencode", "-p", "hello"]);
+    await runMain(["run", "-t", "opencode", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
     assert.ok(stderrData.includes("[opencode] error:"));
@@ -531,7 +531,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "opencode", "-p", "hello"]);
+    await runMain(["run", "-t", "opencode", "hello"]);
 
     assert.strictEqual(exitCode, EXIT_QUOTA_EXCEEDED);
     assert.ok(stderrData.includes("[opencode] error:"));
@@ -546,7 +546,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "opencode", "-p", "hello"]);
+    await runMain(["run", "-t", "opencode", "hello"]);
 
     assert.strictEqual(exitCode, 1);
     assert.ok(stderrData.includes("[opencode] error:"));
@@ -566,7 +566,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "all fine", stderr: "", sessionId: "copilot-session", exitCode: 0 };
     };
 
-    await runMain(["-t", "codex", "-t", "copilot", "-p", "hello"]);
+    await runMain(["run", "-t", "codex", "-t", "copilot", "hello"]);
 
     assert.strictEqual(exitCode, 0);
     assert.strictEqual(copilotCalled, true);
@@ -589,7 +589,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 0,
     });
 
-    await runMain(["-t", "codex", "-t", "cursor", "-p", "hi"]);
+    await runMain(["run", "-t", "codex", "-t", "cursor", "hi"]);
 
     assert.strictEqual(exitCode, EXIT_OK);
     assert.ok(stderrData.includes("[cursor] stderr:\ncursor-thinking"));
@@ -612,7 +612,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 0,
     });
 
-    await runMain(["-t", "codex", "-t", "cursor", "-p", "hi", "-d"]);
+    await runMain(["run", "-t", "codex", "-t", "cursor", "-d", "hi"]);
 
     assert.ok(
       stderrData.includes("agent codex attempt session 1 stderr:\nReading additional input from stdin..."),
@@ -638,7 +638,7 @@ describe("multi-agent fallback E2E", () => {
       };
     };
 
-    await runMain(["-t", "claude", "-p", "hello", "-e", "bad", "-r", "2", "-d"]);
+    await runMain(["run", "-t", "claude", "-e", "bad", "-r", "2", "-d", "hello"]);
 
     assert.strictEqual(attempts, 2);
     assert.ok(
@@ -662,7 +662,7 @@ describe("multi-agent fallback E2E", () => {
       return { stdout: "good match", stderr: "", sessionId: "mock-session-claude", exitCode: 0 };
     };
 
-    await runMain(["-t", "claude", "-p", "hello", "-e", "good", "-r", "2", "-d"]);
+    await runMain(["run", "-t", "claude", "-e", "good", "-r", "2", "-d", "hello"]);
 
     assert.strictEqual(attempts, 2);
     assert.strictEqual(exitCode, EXIT_OK);
@@ -677,7 +677,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "codex", "-p", "hello", "--no-quota", "--enable-throttle", "false"]);
+    await runMain(["run", "-t", "codex", "--no-quota", "--enable-throttle", "false", "hello"]);
 
     assert.strictEqual(exitCode, 1);
     assert.ok(stderrData.includes("non-zero exit code 1"));
@@ -692,7 +692,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "codex", "-p", "hello", "-n", "--enable-throttle", "false"]);
+    await runMain(["run", "-t", "codex", "-n", "--enable-throttle", "false", "hello"]);
 
     assert.strictEqual(exitCode, 1);
     assert.ok(stderrData.includes("non-zero exit code 1"));
@@ -707,7 +707,7 @@ describe("multi-agent fallback E2E", () => {
       exitCode: 1,
     });
 
-    await runMain(["-t", "codex", "-p", "hello"]);
+    await runMain(["run", "-t", "codex", "hello"]);
 
     assert.strictEqual(exitCode, 1);
     assert.ok(stderrData.includes("non-zero exit code 1"));

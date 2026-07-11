@@ -67,18 +67,18 @@ function lastLine(text) {
 
 describe("cursor provider smoke", () => {
   it("completes a simple prompt", { skip: !hasAgent }, async () => {
-    const result = await runWrapper(["-t", "cursor", "-p", "say hi in one word", "-d"]);
+    const result = await runWrapper(["run", "-t", "cursor", "-d", "say hi in one word"]);
     assert.strictEqual(result.code, 0);
     assert.ok(result.stdout.trim().length > 0);
     assert.ok(lastLine(result.stderr).length > 0, "stderr ends with session id");
   });
 
   it("resume preserves session across invocations", { skip: !hasAgent }, async () => {
-    const first = await runWrapper(["-t", "cursor", "-d", "-p", "my name is Bob, remember it"]);
+    const first = await runWrapper(["run", "-t", "cursor", "-d", "my name is Bob, remember it"]);
     const sid1 = lastLine(first.stderr);
     assert.ok(sid1.length > 0);
 
-    const second = await runWrapper(["-t", "cursor", "-d", "-s", sid1, "-p", "what is my name?"]);
+    const second = await runWrapper(["run", "-t", "cursor", "-d", "-s", sid1, "what is my name?"]);
     assert.strictEqual(lastLine(second.stderr), sid1);
     assert.ok(second.stdout.toLowerCase().includes("bob"),
       `expected context recall, got: ${second.stdout.slice(0, 200)}`);

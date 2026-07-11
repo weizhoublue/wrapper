@@ -201,8 +201,8 @@ codex --version  # 确认当前版本
 验证：
 ```bash
 npm test                           # 单元测试
-wrapper -t codex -p "hello" -d       # 实际调用
-wrapper -t codex -c 'codex exec --sandbox read-only' -p "hello"  # 自定义 -c
+wrapper run -t codex "hello" -d       # 实际调用
+wrapper run -t codex -c 'codex exec --sandbox read-only' "hello"  # 自定义 -c
 ```
 
 ## Copilot
@@ -318,8 +318,8 @@ npm install @agentclientprotocol/sdk@latest
 验证：
 ```bash
 npm test                                  # 单元测试
-wrapper -t copilot -p "hello" -d            # 实际调用
-wrapper -t copilot -c 'copilot --allow-all-tools' -p "hello"  # 自定义 -c
+wrapper run -t copilot "hello" -d            # 实际调用
+wrapper run -t copilot -c 'copilot --allow-all-tools' "hello"  # 自定义 -c
 ```
 
 ## Gemini
@@ -379,7 +379,7 @@ gemini --version  # 确认当前版本
 ```bash
 npm test                                    # 单元测试 + 集成测试
 node --test test/provider/gemini.test.js    # Gemini 专用测试
-wrapper -t gemini -p "hello" -d               # 实际调用
+wrapper run -t gemini "hello" -d               # 实际调用
 ```
 
 ## Cursor
@@ -444,10 +444,10 @@ Cursor CLI **原生支持 ACP**。默认以 `agent --yolo --approve-mcps acp` �
 ```bash
 npm test
 node --test test/provider/cursor.test.js
-wrapper -t cursor -p "hello" -d
-wrapper -t cursor -p "hi" 2>/tmp/sid
+wrapper run -t cursor "hello" -d
+wrapper run -t cursor "hi" 2>/tmp/sid
 session=$(tail -1 /tmp/sid)
-wrapper -t cursor -s "$session" -p "what did I say?"
+wrapper run -t cursor -s "$session" "what did I say?"
 ```
 
 ## OpenCode
@@ -499,10 +499,10 @@ npm test
 node --test test/provider/opencode.test.js
 # live API smoke (opt-in):
 WRAPPER_OPENCODE_SMOKE=1 node --test test/provider/opencode.test.js
-wrapper -t opencode -p "hello" -d
-wrapper -t opencode -p "hi" 2>/tmp/sid
+wrapper run -t opencode "hello" -d
+wrapper run -t opencode "hi" 2>/tmp/sid
 session=$(tail -1 /tmp/sid)
-wrapper -t opencode -s "$session" -p "what did I say?"
+wrapper run -t opencode -s "$session" "what did I say?"
 ```
 
 ## agy
@@ -565,10 +565,10 @@ wrapper                                           agy 进程
 ```bash
 npm test
 node --test test/provider/agy.test.js
-wrapper -t agy -p "hello" -d
-wrapper -t agy -p "hi" 2>/tmp/sid
+wrapper run -t agy "hello" -d
+wrapper run -t agy "hi" 2>/tmp/sid
 session=$(tail -1 /tmp/sid)
-wrapper -t agy -s "$session" -p "what did I say?"
+wrapper run -t agy -s "$session" "what did I say?"
 ```
 
 ## 添加新 Provider
