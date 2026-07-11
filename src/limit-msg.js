@@ -10,7 +10,7 @@ const LimitMsg = {
   agy: "",
   // 超额时，开源 opencode 它就卡住一直重试不退出，无法检测
   // 因此，我自己修改了一个版本来支持超额检测退出，并给出提示信息
-  opencode: "OPENCODE_QUOTA_LIMIT",
+  opencode: "OPENCODE_QUOTA_LIMIT|usage limit reached",
 };
 
 function isQuotaExceeded(agentType, stdout, stderr) {
