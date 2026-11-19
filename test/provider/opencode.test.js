@@ -4,6 +4,8 @@ const { spawn, spawnSync } = require("child_process");
 const { EventEmitter } = require("events");
 const { Readable } = require("stream");
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
 
 // Wrap spawn before requiring provider so the provider captures the wrapper.
 const childProcess = require("child_process");
@@ -269,11 +271,11 @@ const runOpencodeSmoke = hasOpencode && process.env.WRAPPER_OPENCODE_SMOKE === "
 
 const mainJs = path.join(__dirname, "..", "..", "src", "main.js");
 
-function runWrapper(args = []) {
+function runWrapper(args = [], env = process.env) {
   return new Promise((resolve) => {
     const child = spawn("node", [mainJs, ...args], {
       cwd: path.join(__dirname, "..", ".."),
-      env: process.env,
+      env,
       stdio: "pipe",
     });
     let stdout = "", stderr = "";
@@ -286,6 +288,42 @@ function runWrapper(args = []) {
 function lastLine(text) {
   return text.trim().split("\n").pop().trim();
 }
+
+describe("opencode e2e - fake v2 binary", () => {
+  it("v2 quota error → exit 206 and throttle record", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wrapper-opencode-e2e-"));
+    try {
+      const binDir = path.join(tmpDir, "bin");
+      fs.mkdirSync(binDir);
+      const argsFile = path.join(tmpDir, "argv");
+      const event = {
+        type: "error",
+        sessionID: "ses_fake",
+        error: { type: "provider.free-limit", message: "Free usage exceeded" },
+      };
+      fs.writeFileSync(path.join(binDir, "opencode"),
+        `#!/bin/sh\nprintf '%s\\n' "$@" > '${argsFile}'\necho '${JSON.stringify(event)}'\nexit 1\n`);
+      fs.chmodSync(path.join(binDir, "opencode"), 0o755);
+
+      const result = await runWrapper(["run", "-t", "opencode", "say hi"], {
+        ...process.env,
+        PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+        WRAPPER_CONFIG_DIR: tmpDir,
+      });
+
+      assert.strictEqual(result.code, 206, result.stderr);
+      assert.deepStrictEqual(fs.readFileSync(argsFile, "utf8").trimEnd().split("\n"),
+        ["run", "--standalone", "--auto", "--format", "json", "say hi"]);
+      assert.strictEqual(lastLine(result.stderr), "ses_fake");
+      const records = JSON.parse(fs.readFileSync(path.join(tmpDir, "throttle.json"), "utf8"));
+      assert.strictEqual(records.length, 1);
+      assert.strictEqual(records[0].type, "opencode");
+      assert.ok(new Date(records[0].endExhausted) > new Date());
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("opencode provider smoke", () => {
   it("completes a simple prompt", { skip: !runOpencodeSmoke }, async () => {
