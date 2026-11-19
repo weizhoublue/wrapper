@@ -148,11 +148,11 @@ node src/main.js run "hello" -d
 | `copilot` | `copilot --acp --allow-all-tools --allow-all-paths --allow-all-urls --no-ask-user` |
 | `gemini` | `gemini --acp --approval-mode=yolo --skip-trust` |
 | `cursor` | `agent --yolo --approve-mcps acp` |
-| `opencode` | `opencode run --dangerously-skip-permissions --format json` |
+| `opencode` | `opencode run --standalone --auto --format json` |
 
 `cursor` 使用 ACP 模式，适合改文件、跑 shell、用 MCP；需事先执行 `agent login` 或配置 `CURSOR_API_KEY`。详见 [providers.md](./providers.md#cursor)。
 
-`opencode` 使用 `run --format json` 模式（类似 codex）；需事先执行 `opencode auth login`。详见 [providers.md](./providers.md#opencode)。
+`opencode` 使用 `run --format json` 模式（类似 codex），要求 OpenCode v2；需事先执行 `opencode auth login`。详见 [providers.md](./providers.md#opencode)，已知限制见 [opencode-v2-known-issues.md](./opencode-v2-known-issues.md)。
 
 ### Cursor 快速示例
 

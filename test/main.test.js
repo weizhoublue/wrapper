@@ -84,7 +84,7 @@ describe("LimitMsg", () => {
       codex: { stdout: "", stderr: "You've hit your usage limit" },
       copilot: { stdout: "", stderr: "You have exceeded your monthly quota" },
       gemini: { stdout: "", stderr: "You have exhausted your capacity" },
-      opencode: { stdout: "", stderr: "OPENCODE_QUOTA_LIMIT" },
+      opencode: { stdout: "", stderr: "provider.quota: Insufficient balance" },
     };
     for (const [type, { stdout, stderr }] of Object.entries(samples)) {
       assert.ok(LimitMsg[type], `${type} should have a LimitMsg pattern`);
@@ -145,39 +145,20 @@ describe("isQuotaExceeded", () => {
     );
   });
 
-  it("matches opencode quota marker in stderr", () => {
-    assert.strictEqual(
-      isQuotaExceeded("opencode", "", "OPENCODE_QUOTA_LIMIT"),
-      true,
-    );
+  it("matches opencode v2 quota error types", () => {
+    for (const type of ["quota", "free-limit", "go-limit", "budget-limit", "model-budget-limit", "chatgpt-limit"]) {
+      assert.strictEqual(
+        isQuotaExceeded("opencode", "", `provider.${type}: limit hit`),
+        true,
+        type,
+      );
+    }
   });
 
-  it("matches opencode quota marker in stdout", () => {
-    assert.strictEqual(
-      isQuotaExceeded("opencode", "OPENCODE_QUOTA_LIMIT", ""),
-      true,
-    );
-  });
-
-  it("matches opencode 'usage limit reached' in stderr", () => {
-    assert.strictEqual(
-      isQuotaExceeded("opencode", "", "usage limit reached"),
-      true,
-    );
-  });
-
-  it("matches opencode 'usage limit reached' in stdout", () => {
-    assert.strictEqual(
-      isQuotaExceeded("opencode", "usage limit reached", ""),
-      true,
-    );
-  });
-
-  it("returns false for opencode when quota text does not match", () => {
-    assert.strictEqual(
-      isQuotaExceeded("opencode", "", "rate limited"),
-      false,
-    );
+  it("returns false for opencode rate-limit and other errors", () => {
+    for (const text of ["provider.rate-limit: Too many requests", "provider.no-route: Model unavailable"]) {
+      assert.strictEqual(isQuotaExceeded("opencode", "", text), false, text);
+    }
   });
 });
 

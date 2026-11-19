@@ -10,7 +10,7 @@ const DEFAULTS = {
   gemini: "gemini --acp --approval-mode=yolo --skip-trust",
   cursor: "agent --yolo --approve-mcps acp",
   agy: "agy --dangerously-skip-permissions ",
-  opencode: "opencode run --dangerously-skip-permissions --format json",
+  opencode: "opencode run --standalone --auto --format json",
 };
 
 const RUN_HELP = `用法: wrapper run <选项...> <提示词>
@@ -36,8 +36,7 @@ const RUN_HELP = `用法: wrapper run <选项...> <提示词>
                                          冷却状态跨进程共享在 ~/.wrapper/throttle.json
     -n, --no-quota                   关闭 agent 订阅额度耗尽检测
                                         检测开启时，如果 api 返回结果显示额度耗尽，则不再重试该 agent，直接 fallback 到下一个 agent
-                                        当前支持 codex copilot gemini
-                                        支持定制版 opencode (开源版本会卡住等待而不退出)
+                                        当前支持 codex copilot gemini opencode(v2)
                                         不支持 claude 和 cursor（不知道长什么样） 
                                         无法检测 agy（无任何提示）
     -r, --retry <次数>               每个 agent 最大重试次数 ，每次重试都使用前一次的会话来继续(默认: 2)

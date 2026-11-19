@@ -25,33 +25,59 @@ const {
   send,
   closeSession,
 } = require("../../src/provider/opencode");
+const { isQuotaExceeded } = require("../../src/limit-msg");
 
 describe("opencode ensureFlags", () => {
   it("inserts run and required flags for bare args", () => {
     assert.deepStrictEqual(
       ensureFlags([]),
-      ["run", "--format", "json", "--dangerously-skip-permissions"],
+      ["run", "--format", "json", "--auto", "--standalone"],
     );
   });
 
   it("preserves existing run subcommand", () => {
     assert.deepStrictEqual(
       ensureFlags(["run"]),
-      ["run", "--format", "json", "--dangerously-skip-permissions"],
+      ["run", "--format", "json", "--auto", "--standalone"],
     );
   });
 
   it("forces --format json", () => {
     assert.deepStrictEqual(
       ensureFlags(["run", "--format", "text"]),
-      ["run", "--format", "json", "--dangerously-skip-permissions"],
+      ["run", "--format", "json", "--auto", "--standalone"],
+    );
+  });
+
+  it("does not add --standalone when --server is given", () => {
+    assert.deepStrictEqual(
+      ensureFlags(["run", "--server", "http://127.0.0.1:4096"]),
+      ["run", "--format", "json", "--server", "http://127.0.0.1:4096", "--auto"],
+    );
+  });
+
+  it("recognizes --server=<url> and --standalone=<value> forms", () => {
+    assert.deepStrictEqual(
+      ensureFlags(["run", "--server=http://127.0.0.1:4096"]),
+      ["run", "--format", "json", "--server=http://127.0.0.1:4096", "--auto"],
+    );
+    assert.deepStrictEqual(
+      ensureFlags(["run", "--standalone=true"]),
+      ["run", "--format", "json", "--standalone=true", "--auto"],
+    );
+  });
+
+  it("does not repeat --format, --auto or --session given as --flag=value or -s", () => {
+    assert.deepStrictEqual(
+      ensureFlags(["run", "--format=default", "--auto=true", "-s", "ses_user"], "ses_resume"),
+      ["run", "--format=json", "--auto=true", "-s", "ses_user", "--standalone"],
     );
   });
 
   it("adds --session when resume is provided", () => {
     assert.deepStrictEqual(
       ensureFlags(["run"], "ses_abc123"),
-      ["run", "--format", "json", "--dangerously-skip-permissions", "--session", "ses_abc123"],
+      ["run", "--format", "json", "--auto", "--standalone", "--session", "ses_abc123"],
     );
   });
 });
@@ -73,15 +99,28 @@ describe("opencode JSON parsing", () => {
     assert.strictEqual(extractSessionId(events), "ses_xyz");
   });
 
-  it("extractErrors collects error messages", () => {
+  it("extractErrors formats v2 error type and message", () => {
     const events = [
-      { type: "error", error: { name: "APIError", data: { message: "rate limited" } } },
+      {
+        type: "error",
+        sessionID: "ses_1",
+        error: { type: "provider.no-route", message: "Model unavailable: nonexistent/foo", response: { body: "{...}" } },
+      },
     ];
-    assert.strictEqual(extractErrors(events), "rate limited");
+    assert.strictEqual(extractErrors(events), "provider.no-route: Model unavailable: nonexistent/foo");
+  });
+
+  it("extractErrors handles missing type or message", () => {
+    assert.strictEqual(extractErrors([{ type: "error", error: { message: "boom" } }]), "boom");
+    assert.strictEqual(
+      extractErrors([{ type: "error", error: { type: "unknown" } }]),
+      '{"type":"unknown"}',
+    );
+    assert.strictEqual(extractErrors([{ type: "error" }]), "");
   });
 
   it("inferExitCode returns 1 on error events", () => {
-    const events = [{ type: "error", error: { name: "Fail" } }];
+    const events = [{ type: "error", error: { type: "unknown", message: "Fail" } }];
     assert.strictEqual(inferExitCode(events, 0, false), 1);
   });
 });
@@ -155,6 +194,63 @@ describe("opencode send - timeout when descendants hold pipe fd", () => {
       assert.strictEqual(result.exitCode, 1);
       assert.ok(elapsed < 200, `should resolve nearly immediately, elapsed=${elapsed}ms`);
       assert.ok(killSignals.includes("SIGTERM"), "should have killed the spawned child");
+    } finally {
+      mockSpawnFn = null;
+      await closeSession(session);
+    }
+  });
+});
+
+describe("opencode send - v2 quota error", () => {
+  it("surfaces the provider.* error type so quota detection matches", async () => {
+    mockSpawnFn = () => {
+      const child = new EventEmitter();
+      const event = {
+        type: "error",
+        sessionID: "ses_quota",
+        error: { type: "provider.free-limit", message: "Free usage exceeded" },
+      };
+      child.stdout = Readable.from([JSON.stringify(event) + "\n"]);
+      child.stdout.on("end", () => setImmediate(() => child.emit("close", 1)));
+      child.stderr = new EventEmitter();
+      child.unref = () => {};
+      child.kill = () => {};
+      return child;
+    };
+
+    const session = await createSession({ command: "node", timeout: 10 });
+    try {
+      const result = await send(session, "test prompt");
+      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(result.sessionId, "ses_quota");
+      assert.strictEqual(result.stderr, "provider.free-limit: Free usage exceeded");
+      assert.strictEqual(isQuotaExceeded("opencode", result.stdout, result.stderr), true);
+    } finally {
+      mockSpawnFn = null;
+      await closeSession(session);
+    }
+  });
+});
+
+describe("opencode send - session flag", () => {
+  it("does not add --session when the command already has -s", async () => {
+    let spawnedArgs = null;
+    mockSpawnFn = (cmd, args) => {
+      spawnedArgs = args;
+      const child = new EventEmitter();
+      child.stdout = Readable.from([]);
+      child.stdout.on("end", () => setImmediate(() => child.emit("close", 0)));
+      child.stderr = new EventEmitter();
+      child.unref = () => {};
+      child.kill = () => {};
+      return child;
+    };
+
+    const session = await createSession({ command: "node run -s ses_user", timeout: 10 });
+    session.sessionId = "ses_user"; // as after a timed-out attempt
+    try {
+      await send(session, "continue");
+      assert.ok(!spawnedArgs.includes("--session"), `unexpected --session in ${JSON.stringify(spawnedArgs)}`);
     } finally {
       mockSpawnFn = null;
       await closeSession(session);
