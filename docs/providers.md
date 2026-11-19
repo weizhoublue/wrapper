@@ -39,7 +39,7 @@ agent --yolo --approve-mcps acp
 agy --dangerously-skip-permissions 
 
 # opencode
-opencode run --dangerously-skip-permissions --format json
+opencode run --standalone --auto --format json
 ```
 
 | Provider | 通信方式 | npm 依赖 | 自动注入 flag | Resume（`-s`） | 退出码来源 |
@@ -50,7 +50,7 @@ opencode run --dangerously-skip-permissions --format json
 | Gemini | ACP | `agentclientprotocol/sdk` | `--acp`, `--approval-mode=yolo`, `--skip-trust` | ACP `session/load` 协议方法 | 同上 |
 | Cursor | ACP | `agentclientprotocol/sdk` | `--yolo`, `--approve-mcps`, `acp` | ACP `session/load` 协议方法 | 同上 |
 | agy | spawn 子进程 + log 提取 | 无 | `--dangerously-skip-permissions`, `--log-file`, `--print` | `--conversation <id>` CLI flag | 真实 OS 退出码 |
-| opencode | spawn 子进程 + 二进制调用 NDJSON | 无 | `run`, `--format json`, `--dangerously-skip-permissions` | `--session <id>` CLI flag | 真实 OS 退出码 + JSON error 事件 |
+| opencode | spawn 子进程 + 二进制调用 NDJSON | 无 | `run`, `--format json`, `--auto`, `--standalone` | `--session <id>` CLI flag | 真实 OS 退出码 + JSON error 事件 |
 
 ## Claude
 
@@ -454,7 +454,7 @@ wrapper run -t cursor -s "$session" "what did I say?"
 
 ### CLI 工具
 
-[OpenCode](https://opencode.ai/)（CLI 命令：`opencode`）。
+[OpenCode](https://opencode.ai/)（CLI 命令：`opencode`）。要求 OpenCode v2（已验证 v2.3.2）；v1 及基于 v1 的定制版不再支持。
 
 ### 为什么用 run + JSON
 
@@ -466,7 +466,7 @@ OpenCode CLI 的 `opencode run` 支持非交互单次执行；加 `--format json
 
 ### 交互原理
 
-每次 `send()` 执行 `opencode run ... <prompt>`。stdout 为 NDJSON 事件流；stderr 为 CLI 诊断输出。`extractText()` 拼接 `type: "text"` 的 `part.text`；`extractSessionId()` 读取事件中的 `sessionID`。
+每次 `send()` 执行 `opencode run ... <prompt>`。stdout 为 NDJSON 事件流；stderr 为 CLI 诊断输出。`extractText()` 拼接 `type: "text"` 的 `part.text`；`extractSessionId()` 读取事件中的 `sessionID`；`extractErrors()` 把 `type: "error"` 事件的 `error.type` 与 `error.message` 拼成 `provider.quota: <message>` 形式写入 stderr。
 
 ### 必需 flag（自动注入）
 
@@ -476,13 +476,24 @@ OpenCode CLI 的 `opencode run` 支持非交互单次执行；加 `--format json
 |------|------|
 | `run` | 非交互单次执行（否则进入 TUI） |
 | `--format json` | NDJSON 事件流，含 sessionID |
-| `--dangerously-skip-permissions` | 跳过权限确认 |
+| `--auto` | 自动批准权限（配置中显式 deny 的仍会被拒绝） |
+| `--standalone` | 使用本次 run 私有的 server，而不是连接后台 service（命令中已有 `--server` 时不注入，二者互斥） |
 
-示例：`opencode` → `opencode run --format json --dangerously-skip-permissions`
+示例：`opencode` → `opencode run --format json --auto --standalone`
+
+命令中已有的 flag 按 `--flag value` 和 `--flag=value` 两种写法识别（`--session` 还识别 `-s`），不会重复注入；v2 遇到重复 flag 会直接报错。
+
+v2 中 `opencode run` 只是客户端，默认会连接用户已启动的后台 service（用过 TUI 后通常常驻）。连接 service 时，`OPENCODE_CONFIG*`、provider API key 等由 service 进程按它自己的环境读取，wrapper 或 `-c` 自定义命令设置的环境变量只转发给 shell 工具，不影响配置和凭据；run 也不检查 service 版本，版本不一致时没有任何提示（只有显式 `--server` 时才会打印 warning）。`--standalone` 让 server 随 run 进程启动和退出（stdin EOF），代价是每次 attempt 多 3～4 秒启动时间。
+
+### Quota 检测
+
+OpenCode v2 遇到订阅额度耗尽会立即失败（不重试），error 事件的 `error.type` 为 `provider.quota`、`provider.free-limit`、`provider.go-limit`、`provider.budget-limit`、`provider.model-budget-limit`、`provider.chatgpt-limit` 之一。`LimitMsg.opencode` 按这些类型匹配。`provider.rate-limit`（普通 429）不视为 quota。
 
 ### Session Resume（`-s`）
 
-指定 `-s ses_...` 时，wrapper 注入 `--session <id>`（与 `opencode run --session` 一致）。Session ID 由 JSON 事件中的 `sessionID` 字段提供。
+指定 `-s ses_...` 时，wrapper 注入 `--session <id>`（与 `opencode run --session` 一致）。Session ID 由 JSON 事件中的 `sessionID` 字段提供。v2 中 id 不存在时会用该 id 新建空 session（不报错）；恢复已有 session 时在该 session 原来的目录中运行。
+
+已知限制见 [opencode-v2-known-issues.md](./opencode-v2-known-issues.md)。
 
 ### 认证
 

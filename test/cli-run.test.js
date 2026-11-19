@@ -129,7 +129,7 @@ describe("parseRunArgs", () => {
 
   it("resolves default command for opencode type", () => {
     const opts = parseRunArgs(["node", "main.js", "run", "-t", "opencode", "hi"]);
-    assert.strictEqual(opts.agents[0].command, "opencode run --dangerously-skip-permissions --format json");
+    assert.strictEqual(opts.agents[0].command, "opencode run --standalone --auto --format json");
     assert.strictEqual(opts.agents[0].commandName, "opencode");
   });
 

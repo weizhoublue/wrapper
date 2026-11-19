@@ -23,7 +23,9 @@ function extractErrors(events) {
   const parts = [];
   for (const e of events) {
     if (e.type === "error") {
-      const msg = e.error?.data?.message || e.error?.name || JSON.stringify(e.error);
+      // v2 error shape: { type: "provider.quota", message, status?, response? }
+      const { type, message } = e.error || {};
+      const msg = message ? (type ? `${type}: ${message}` : message) : JSON.stringify(e.error);
       if (msg) parts.push(msg);
     }
   }
@@ -43,7 +45,12 @@ function inferExitCode(events, exitCode, timedOut) {
   return exitCode || 0;
 }
 
-const REQUIRED_FLAGS = ["--dangerously-skip-permissions"];
+const REQUIRED_FLAGS = ["--auto"];
+
+// opencode v2 rejects repeated flags, so match both "--flag value" and "--flag=value".
+function findFlag(args, ...names) {
+  return args.findIndex((a) => names.some((n) => a === n || a.startsWith(`${n}=`)));
+}
 
 function ensureFlags(args, resume) {
   const out = [...args];
@@ -52,23 +59,30 @@ function ensureFlags(args, resume) {
     out.unshift("run");
   }
 
-  if (!out.includes("--format")) {
+  const fmtIdx = findFlag(out, "--format");
+  if (fmtIdx === -1) {
     const runIdx = out.indexOf("run");
     out.splice(runIdx + 1, 0, "--format", "json");
-  } else {
-    const fmtIdx = out.indexOf("--format");
-    if (out[fmtIdx + 1] !== "json") {
-      out[fmtIdx + 1] = "json";
-    }
+  } else if (out[fmtIdx].includes("=")) {
+    out[fmtIdx] = "--format=json";
+  } else if (out[fmtIdx + 1] !== "json") {
+    out[fmtIdx + 1] = "json";
   }
 
   for (const flag of REQUIRED_FLAGS) {
-    if (!out.includes(flag)) {
+    if (findFlag(out, flag) === -1) {
       out.push(flag);
     }
   }
 
-  if (resume && !out.includes("--session")) {
+  // Use a private server instead of a running background service, so the
+  // server reads our env/config, matches the client version and exits with the run.
+  // opencode rejects --standalone combined with --server.
+  if (findFlag(out, "--standalone", "--server") === -1) {
+    out.push("--standalone");
+  }
+
+  if (resume && findFlag(out, "--session", "-s") === -1) {
     out.push("--session", resume);
   }
 
@@ -99,7 +113,7 @@ async function send(session, prompt) {
   if (session.closed) throw new Error("session closed");
 
   const args = [...session.baseArgs];
-  if (session.sessionId && !args.includes("--session")) {
+  if (session.sessionId && findFlag(args, "--session", "-s") === -1) {
     args.push("--session", session.sessionId);
   }
   args.push(prompt);
